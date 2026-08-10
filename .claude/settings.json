@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "Edit",
+      "Write",
+      "Bash(pytest*)",
+      "Bash(python*)",
+      "Bash(py*)",
+      "Bash(pip install*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git log*)",
+      "Bash(mkdir*)",
+      "Bash(sqlite3*)",
+      "Bash(type*)",
+      "Bash(dir*)"
+    ],
+    "deny": [
+      "Bash(git push*)",
+      "Bash(git reset --hard*)",
+      "Bash(rm*)",
+      "Bash(del*)",
+      "Bash(curl*)",
+      "Bash(docker*)"
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+producto,insumo,cantidad
+Batido fresa platano,platano,0.12
+Batido fresa platano,fresa,0.10
+Batido fresa platano,leche de almendras,0.20
+Batido verde detox,espinaca,0.06
+Batido verde detox,platano,0.10
+Batido verde detox,leche de almendras,0.20
+Batido de proteina,proteina en polvo vainilla,0.03
+Batido de proteina,platano,0.10
+Batido de proteina,leche de almendras,0.25
+Bowl de yogurt con granola,yogurt griego,0.20
+Bowl de yogurt con granola,granola,0.05
+Bowl de yogurt con granola,fresa,0.05
+Bowl de avena y fruta,avena,0.06
+Bowl de avena y fruta,platano,0.10
+Bowl de avena y fruta,leche de almendras,0.15
+Tostada de palta,pan integral,2
+Tostada de palta,palta,0.10
+Tostada de palta con huevo,pan integral,2
+Tostada de palta con huevo,palta,0.10
+Tostada de palta con huevo,huevo,1
+Cafe americano,cafe en grano,0.018
+Capuchino,cafe en grano,0.018
+Capuchino,leche de almendras,0.15
+Cafe con leche de almendras,cafe en grano,0.018
+Cafe con leche de almendras,leche de almendras,0.20
