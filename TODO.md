@@ -5,7 +5,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 
 ## Fase 0 — Datos (1 día)
 
-- [ ] **0.1** `core/db.py` con el DDL de SPEC §2 y función `get_conn()`
+- [x] **0.1** `core/db.py` con el DDL de SPEC §2 y función `get_conn()`
 - [ ] **0.2** `scripts/seed.py`: 12 insumos, 10 productos, recetas, 25 clientes,
       60 días de ventas con la estacionalidad de SPEC §2
 - [ ] **0.3** Verificar a mano con SQL: consumo de un insumo en un mes, total de
