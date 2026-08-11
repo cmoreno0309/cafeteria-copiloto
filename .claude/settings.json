@@ -16,7 +16,6 @@
       "Bash(git commit*)",
       "Bash(git log*)",
       "Bash(mkdir*)",
-      "Bash(sqlite3*)",
       "Bash(type*)",
       "Bash(dir*)"
     ],

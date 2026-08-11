@@ -54,6 +54,12 @@ def test_ventas_cubren_60_dias_hasta_hoy(conn):
     assert fecha_min == (HOY - timedelta(days=DIAS_HISTORIA - 1)).isoformat()
 
 
+def test_no_hay_ventas_en_domingo(conn):
+    fechas = conn.execute("SELECT DISTINCT fecha FROM ventas").fetchall()
+    dias_domingo = [f for (f,) in fechas if date.fromisoformat(f).weekday() == 6]
+    assert dias_domingo == []
+
+
 def test_viernes_y_sabado_venden_mas_que_lunes(conn):
     filas = conn.execute(
         "SELECT fecha, SUM(cantidad) FROM ventas GROUP BY fecha"

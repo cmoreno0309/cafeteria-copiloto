@@ -76,11 +76,11 @@ tests/             pruebas unitarias de herramientas
 ## Comandos
 
 ```bash
-pytest -q                      # todas las pruebas
-pytest tests/test_stock.py -q  # una sola
-python scripts/seed.py         # regenera datos sintéticos
-python -m evals.run_evals      # corre el dataset de evaluación
-python -m channels.mcp_server  # levanta el servidor MCP
+py -m pytest -q                      # todas las pruebas
+py -m pytest tests/test_stock.py -q  # una sola
+py -m scripts.seed                   # regenera datos sintéticos
+py -m evals.run_evals                # corre el dataset de evaluación
+py -m channels.mcp_server            # levanta el servidor MCP
 ```
 
 ## Qué preguntarme y qué no

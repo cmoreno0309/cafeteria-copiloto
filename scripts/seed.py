@@ -5,6 +5,7 @@ SPEC.md) y genera clientes y ventas de forma aleatoria pero reproducible
 (semilla fija) con la estacionalidad descrita en SPEC.md Seccion 2:
 viernes y sabado 40% mas de ventas que un lunes, un producto en declive
 sostenido y cinco clientes que dejan de comprar hace mas de 30 dias.
+La cafeteria no abre domingos, asi que no se genera ninguna venta ese dia.
 """
 
 import csv
@@ -26,6 +27,8 @@ PRODUCTO_EN_DECLIVE = "Bowl de avena y fruta"
 PROB_SIN_CLIENTE = 0.15
 BASE_VENTAS_DIA = 10
 
+DOMINGO = 6  # cafeteria cerrada, nunca se genera venta este dia
+
 MULTIPLICADOR_DIA = {
     0: 1.0,  # lunes
     1: 1.0,  # martes
@@ -33,7 +36,6 @@ MULTIPLICADOR_DIA = {
     3: 1.0,  # jueves
     4: 1.4,  # viernes
     5: 1.4,  # sabado
-    6: 0.7,  # domingo
 }
 
 NOMBRES_CLIENTES = [
@@ -141,14 +143,20 @@ def generar_ventas(conn, rng, cliente_ids, hoy):
     # aseguramos historial de compras de los clientes inactivos antes del corte,
     # para que cumplan el minimo_compras exigido por clientes_inactivos
     for cliente_id in inactivos:
-        for _ in range(rng.randint(4, 7)):
+        compras_pendientes = rng.randint(4, 7)
+        while compras_pendientes > 0:
             offset = rng.randint(CORTE_INACTIVIDAD, DIAS_HISTORIA - 1)
             fecha = hoy - timedelta(days=offset)
+            if fecha.weekday() == DOMINGO:
+                continue
             producto = _elegir_producto(rng, productos, offset)
             _insertar_venta(conn, fecha, cliente_id, producto, rng)
+            compras_pendientes -= 1
 
     for offset in range(DIAS_HISTORIA - 1, -1, -1):
         fecha = hoy - timedelta(days=offset)
+        if fecha.weekday() == DOMINGO:
+            continue
         num_ventas = round(BASE_VENTAS_DIA * MULTIPLICADOR_DIA[fecha.weekday()])
         pool_clientes = activos if offset < CORTE_INACTIVIDAD else cliente_ids
         for _ in range(num_ventas):
