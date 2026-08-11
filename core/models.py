@@ -31,6 +31,7 @@ class ListaStock(BaseModel):
 class ConsumoInsumo(BaseModel):
     insumo: str
     dias_analizados: int
+    dias_con_ventas: int
     consumo_diario: float
     dias_de_cobertura: float | None
 

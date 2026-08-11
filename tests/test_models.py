@@ -69,6 +69,7 @@ def test_consumo_insumo_valido():
     consumo = ConsumoInsumo(
         insumo="platano",
         dias_analizados=14,
+        dias_con_ventas=12,
         consumo_diario=1.2,
         dias_de_cobertura=4.5,
     )
@@ -79,6 +80,7 @@ def test_consumo_insumo_permite_cobertura_none():
     consumo = ConsumoInsumo(
         insumo="platano",
         dias_analizados=14,
+        dias_con_ventas=0,
         consumo_diario=0.0,
         dias_de_cobertura=None,
     )
@@ -90,6 +92,7 @@ def test_consumo_insumo_invalido():
         ConsumoInsumo(
             insumo="platano",
             dias_analizados="catorce",
+            dias_con_ventas=12,
             consumo_diario=1.2,
             dias_de_cobertura=4.5,
         )

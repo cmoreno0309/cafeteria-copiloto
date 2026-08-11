@@ -86,7 +86,13 @@ Salida: `items: list[ItemStock]` con `nombre, unidad, stock, minimo, bajo_minimo
 
 ### 3.2 `consumo_promedio(insumo: str, dias: int = 14) -> ConsumoInsumo`
 Consumo diario promedio de un insumo, derivado de ventas × recetas en la ventana.
-Salida: `insumo, dias_analizados, consumo_diario, dias_de_cobertura`.
+Salida: `insumo, dias_analizados, dias_con_ventas, consumo_diario, dias_de_cobertura`.
+`dias_analizados` es el tamaño de la ventana solicitada (el parámetro `dias`).
+`dias_con_ventas` es el número real de días con al menos una venta dentro de
+esa ventana (la cafetería no abre domingos, así que puede ser menor que
+`dias_analizados`). `consumo_diario = consumo_total / dias_con_ventas` — el
+divisor es `dias_con_ventas`, no `dias_analizados`, porque dividir entre días
+de calendario en vez de días abiertos subestima el consumo.
 `dias_de_cobertura = stock_actual / consumo_diario` (si el consumo es 0, devuelve `None`).
 
 ### 3.3 `ventas_por_periodo(desde: date, hasta: date, agrupar_por: str) -> ResumenVentas`
