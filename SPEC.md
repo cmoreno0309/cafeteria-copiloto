@@ -80,7 +80,7 @@ mostrar); 5 clientes que dejan de comprar hace más de 30 días.
 Cinco de lectura, una de escritura. Todas devuelven un modelo Pydantic, nunca
 texto libre. Todas van en `core/tools/`.
 
-### 3.1 `stock_actual(categoria: str | None = None) -> ListaStock`
+### 3.1 `stock_actual(proveedor: str | None = None) -> ListaStock`
 Stock de cada insumo con su mínimo y si está por debajo.
 Salida: `items: list[ItemStock]` con `nombre, unidad, stock, minimo, bajo_minimo, proveedor`.
 
