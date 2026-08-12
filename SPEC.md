@@ -108,10 +108,15 @@ Salida: `items: list[MargenProducto]` con `producto, precio, costo, margen_unita
 Clientes con al menos `minimo_compras` históricas y ninguna en los últimos `dias`.
 Salida: `items: list[ClienteInactivo]` con `nombre, ultima_compra, dias_sin_venir, compras_totales, ticket_promedio`.
 
-### 3.6 `crear_orden_compra(proveedor: str, items: list[ItemOrden]) -> OrdenCompra` (ESCRITURA)
+### 3.6 `crear_orden_compra(proveedor: str, items: list[ItemOrden], aprobacion: Aprobacion | None = None) -> OrdenCompra` (ESCRITURA)
 Inserta en `ordenes_compra` con estado `aprobada`. **Solo se invoca después del
-`interrupt`.** Si se llama sin aprobación previa en el estado del grafo, lanza
-excepción.
+`interrupt`.** La evidencia de esa aprobación se pasa explícitamente como
+`aprobacion: Aprobacion`, con `aprobada_por: str` y `aprobada_en: datetime`.
+Si `aprobacion` viene en `None`, la herramienta lanza `PermissionError` y no
+inserta nada: no hay forma de que la herramienta verifique por sí sola que el
+`interrupt` ocurrió, así que exige que quien la llama (el nodo
+`aplicar_accion` del grafo) le entregue esos dos datos, extraídos del payload
+de reanudación.
 
 ### 3.7 Regla de "qué comprar"
 

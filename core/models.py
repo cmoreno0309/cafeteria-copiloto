@@ -86,6 +86,11 @@ class ListaClientes(BaseModel):
 # 3.6 crear_orden_compra
 
 
+class Aprobacion(BaseModel):
+    aprobada_por: str
+    aprobada_en: datetime
+
+
 class ItemOrden(BaseModel):
     insumo: str
     cantidad: float
