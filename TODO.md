@@ -21,7 +21,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 - [x] **1.3** `consumo_promedio` + test (incluye el caso consumo = 0)
 - [x] **1.4** `ventas_por_periodo` + test (un caso por cada `agrupar_por`)
 - [x] **1.5** `margen_por_producto` + test
-- [ ] **1.6** `clientes_inactivos` + test
+- [x] **1.6** `clientes_inactivos` + test
 - [ ] **1.7** `crear_orden_compra` + test, incluyendo que **falle** si se llama
       sin aprobación en el estado
 - [ ] **1.8** `sugerir_compra`: la regla de SPEC §3.7 sobre las dos anteriores + test
