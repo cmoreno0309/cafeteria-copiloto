@@ -105,3 +105,23 @@ class OrdenCompra(BaseModel):
     aprobada_por: str | None
     aprobada_en: datetime | None
     items: list[ItemOrden]
+
+
+# 3.7 sugerir_compra
+
+
+class ItemSugerido(BaseModel):
+    insumo: str
+    cantidad: float
+    unidad: str
+    urgencia: str
+    costo_unitario_estimado: float
+
+
+class SugerenciaProveedor(BaseModel):
+    proveedor: str
+    items: list[ItemSugerido]
+
+
+class ListaSugerencias(BaseModel):
+    proveedores: list[SugerenciaProveedor]

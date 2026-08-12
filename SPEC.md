@@ -118,7 +118,7 @@ inserta nada: no hay forma de que la herramienta verifique por sí sola que el
 `aplicar_accion` del grafo) le entregue esos dos datos, extraídos del payload
 de reanudación.
 
-### 3.7 Regla de "qué comprar"
+### 3.7 `sugerir_compra(conn=None, hoy=None) -> ListaSugerencias`
 
 No es machine learning, es aritmética, y así se documenta:
 
@@ -131,6 +131,21 @@ para cada insumo:
     cantidad_sugerida = consumo_diario * 14 - stock_actual   (redondeado hacia arriba)
 agrupar el resultado por proveedor
 ```
+
+Sin ventas en la ventana (`consumo_diario = 0`, `dias_de_cobertura = None`) el
+insumo se excluye: no hay evidencia de una tasa de consumo con la que
+calcular una cantidad, sin importar cuánto stock tenga.
+
+Se apoya en `stock_actual` y `consumo_promedio` (ventana fija de 14 días, sin
+parámetro configurable). `costo_unitario_estimado` sale de una consulta
+directa a `insumos.costo_unitario`, porque ninguna de esas dos herramientas
+lo expone en su salida.
+
+Salida: `proveedores: list[SugerenciaProveedor]`, cada uno con `proveedor` y
+`items: list[ItemSugerido]` (`insumo, cantidad, unidad, urgencia,
+costo_unitario_estimado`). El campo se llama `cantidad` (no
+`cantidad_sugerida`) a propósito: mismos nombres que `ItemOrden`, para que el
+grafo arme la orden propuesta sin lógica intermedia.
 
 ## 4. El grafo
 
