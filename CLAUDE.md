@@ -20,6 +20,9 @@ NO es un punto de venta. NO toma pedidos. NO cobra.
 - Langfuse (contenedor local) para trazas
 - matplotlib para gráficos como imagen
 - python-dotenv para cargar variables de entorno desde `.env`
+- langchain-google-genai para llamar a Gemini con salida estructurada Pydantic
+  (`ChatGoogleGenerativeAI(...).with_structured_output(Modelo)`)
+- langgraph-checkpoint-sqlite para el checkpointer del grafo (`SqliteSaver`)
 
 No agregues dependencias sin decirlo en el resumen de la tarea.
 
@@ -100,12 +103,20 @@ tests/             pruebas unitarias de herramientas
 ## Comandos
 
 ```bash
-py -m pytest -q                      # todas las pruebas
+py -m pytest -q                      # todas las pruebas (excluye las marcadas @pytest.mark.api)
 py -m pytest tests/test_stock.py -q  # una sola
+py -m pytest -q -m api               # solo las pruebas que llaman a Gemini de verdad (cuestan dinero)
 py -m scripts.seed                   # regenera datos sintéticos
 py -m evals.run_evals                # corre el dataset de evaluación
 py -m channels.mcp_server            # levanta el servidor MCP
 ```
+
+Las pruebas marcadas con `@pytest.mark.api` (por ejemplo, los 5 casos de
+`tests/test_graph.py` que verifican que `entender` clasifica bien preguntas
+reales) llaman a la API de Gemini y por lo tanto cuestan dinero y necesitan
+`GEMINI_API_KEY` real en `.env` más la base sembrada (`py -m scripts.seed`).
+`pytest.ini` las excluye por defecto (`addopts = -m "not api"`); `-m api` en
+la línea de comandos pisa ese default y corre solo esas.
 
 ## Qué preguntarme y qué no
 
