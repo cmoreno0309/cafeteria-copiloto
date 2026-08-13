@@ -25,18 +25,25 @@ No agregues dependencias sin decirlo en el resumen de la tarea.
 
 ## Configuración (variables de entorno)
 
-La clave de la API de Gemini se lee de `GEMINI_API_KEY`, cargada desde un
-archivo `.env` en la raíz del proyecto vía `core/config.py`
-(usa `python-dotenv`, `load_dotenv()` se ejecuta al importar el módulo).
+Dos variables se leen desde un archivo `.env` en la raíz del proyecto vía
+`core/config.py` (usa `python-dotenv`, `load_dotenv()` se ejecuta al
+importar el módulo). Trato distinto para cada una:
 
-- `.env` guarda la clave real y está en `.gitignore`. Nunca se commitea.
-- `.env.example` documenta la variable vacía y sí se commitea.
-- Para configurar: copiar `.env.example` a `.env` y completar el valor.
-- Cualquier código que necesite la clave debe llamar a
-  `core.config.get_gemini_api_key()`, no leer `os.environ` directo ni dejar
-  que falle con el error crudo de la librería de Gemini. Si la variable
-  falta, esa función lanza `RuntimeError` con un mensaje que dice qué
-  archivo copiar y completar.
+- `GEMINI_API_KEY` — **obligatoria**. `core.config.get_gemini_api_key()`
+  lanza `RuntimeError` si falta o está vacía, con un mensaje que dice qué
+  archivo copiar y completar. Nunca debe fallar con el error crudo de la
+  librería de Gemini.
+- `GEMINI_MODEL` — **opcional**. `core.config.get_gemini_model()` devuelve
+  su valor si está definida; si falta o está vacía, devuelve
+  `GEMINI_MODEL_POR_DEFECTO` (`"gemini-2.5-flash"`) y registra un log de
+  nivel INFO indicando que se usó el default. Nunca falla.
+
+Cualquier código que necesite estos valores debe llamar a estas dos
+funciones, no leer `os.environ` directo.
+
+- `.env` guarda los valores reales y está en `.gitignore`. Nunca se commitea.
+- `.env.example` documenta ambas variables vacías y sí se commitea.
+- Para configurar: copiar `.env.example` a `.env` y completar los valores.
 
 ## Estructura de carpetas
 
