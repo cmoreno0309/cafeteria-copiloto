@@ -29,7 +29,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 ### Día 3: el grafo
 
 - [x] **1.9** Nodo `entender` con salida Pydantic + checkpointer SQLite
-- [ ] **1.10** Nodo `ejecutar_herramientas` (caso simple: una herramienta)
+- [x] **1.10** Nodo `ejecutar_herramientas` (caso simple: una herramienta)
 - [ ] **1.11** Caso multi-herramienta: "¿qué compro esta semana?"
 - [ ] **1.12** Nodo `redactar` — probar que no invente números que no vinieron
       de una herramienta

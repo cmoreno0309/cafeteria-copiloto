@@ -5,15 +5,24 @@ from datetime import date
 
 import pytest
 
-from core.db import init_db
+from core.db import get_conn, init_db
 from core.graph import (
+    ErrorHerramienta,
     Intencion,
     ParametrosPregunta,
     SalidaEntender,
     _checkpointer,
     construir_grafo,
+    ejecutar_herramientas,
     entender,
     normalizar_insumo,
+)
+from core.models import (
+    ConsumoInsumo,
+    ListaClientes,
+    ListaMargenes,
+    ListaStock,
+    ResumenVentas,
 )
 
 HOY = date(2026, 8, 13)
@@ -81,6 +90,82 @@ def test_grafo_con_entender_stub_actualiza_estado_y_persiste_checkpoint(
     assert estado_persistido.values["intencion"] == salida_canned.intencion
 
 
+@pytest.fixture
+def conn_stock(tmp_path):
+    ruta = tmp_path / "test.db"
+    init_db(ruta)
+    conexion = get_conn(ruta)
+    conexion.executemany(
+        "INSERT INTO insumos "
+        "(nombre, unidad, stock_actual, stock_minimo, costo_unitario, proveedor) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            ("espinaca", "kg", 0.3, 1.0, 2.5, "Verduras Sur"),
+            ("platano", "kg", 5.0, 2.0, 1.2, "Frutas del Valle"),
+        ],
+    )
+    conexion.commit()
+    yield conexion
+    conexion.close()
+
+
+def _estado_con(intencion: Intencion, parametros: ParametrosPregunta | None = None) -> dict:
+    estado = _estado("pregunta de prueba")
+    estado["intencion"] = intencion
+    estado["parametros"] = parametros
+    return estado
+
+
+def test_ejecutar_herramientas_llama_stock_actual_con_parametros_correctos(
+    conn_stock,
+):
+    estado = _estado_con(
+        Intencion(herramientas=["stock_actual"], ambigua=False),
+        ParametrosPregunta(proveedor="Frutas del Valle"),
+    )
+
+    resultado = ejecutar_herramientas(estado, conn=conn_stock)
+
+    items = resultado["resultados_herramientas"]["stock_actual"].items
+    assert len(items) == 1
+    assert items[0].nombre == "platano"
+
+
+def test_ejecutar_herramientas_registra_value_error_como_error_herramienta(
+    conn_stock,
+):
+    estado = _estado_con(
+        Intencion(herramientas=["consumo_promedio"], ambigua=False),
+        ParametrosPregunta(insumo="insumo que no existe"),
+    )
+
+    resultado = ejecutar_herramientas(estado, conn=conn_stock)
+
+    error = resultado["resultados_herramientas"]["consumo_promedio"]
+    assert isinstance(error, ErrorHerramienta)
+    assert "no existe" in error.mensaje
+
+
+def test_ejecutar_herramientas_pregunta_ambigua_no_llama_ninguna_herramienta(
+    conn_stock,
+):
+    estado = _estado_con(
+        Intencion(herramientas=[], ambigua=True, motivo="falta el periodo"),
+    )
+
+    resultado = ejecutar_herramientas(estado, conn=conn_stock)
+
+    assert resultado["resultados_herramientas"] == {}
+
+
+def test_ejecutar_herramientas_sin_intencion_no_llama_ninguna_herramienta(conn_stock):
+    estado = _estado("pregunta de prueba")
+
+    resultado = ejecutar_herramientas(estado, conn=conn_stock)
+
+    assert resultado["resultados_herramientas"] == {}
+
+
 def _estado(pregunta: str) -> dict:
     return {
         "pregunta": pregunta,
@@ -93,41 +178,70 @@ def _estado(pregunta: str) -> dict:
     }
 
 
-@pytest.mark.api
-def test_entender_stock_bajo_minimo():
-    resultado = entender(_estado("¿Qué insumos están por debajo del mínimo?"))
-
-    assert resultado["intencion"].herramientas == ["stock_actual"]
-    assert resultado["intencion"].ambigua is False
-
-
-@pytest.mark.api
-def test_entender_consumo_promedio_normaliza_insumo_con_tilde():
-    resultado = entender(_estado("¿Cuál es el consumo promedio diario de plátano?"))
-
-    assert resultado["intencion"].herramientas == ["consumo_promedio"]
-    assert resultado["parametros"].insumo == "platano"
+def _entender_y_ejecutar(pregunta: str) -> dict:
+    """pregunta -> entender (Gemini real) -> ejecutar_herramientas, encadenados."""
+    estado = _estado(pregunta)
+    estado.update(entender(estado))
+    estado.update(ejecutar_herramientas(estado))
+    return estado
 
 
 @pytest.mark.api
-def test_entender_ventas_por_periodo():
-    resultado = entender(
-        _estado("¿Cómo van las ventas de julio 2026 agrupadas por producto?")
+def test_stock_actual_via_grafo_filtra_los_insumos_bajo_minimo():
+    estado = _entender_y_ejecutar("¿Qué insumos están por debajo del mínimo?")
+
+    assert estado["intencion"].herramientas == ["stock_actual"]
+    assert estado["intencion"].ambigua is False
+
+    resultado = estado["resultados_herramientas"]["stock_actual"]
+    assert isinstance(resultado, ListaStock)
+    # valor conocido de evals/valores_base.md: 3 insumos bajo minimo
+    nombres_bajo_minimo = {item.nombre for item in resultado.items if item.bajo_minimo}
+    assert nombres_bajo_minimo == {"espinaca", "fresa", "palta"}
+
+
+@pytest.mark.api
+def test_consumo_promedio_via_grafo_normaliza_insumo_con_tilde():
+    estado = _entender_y_ejecutar("¿Cuál es el consumo promedio diario de plátano?")
+
+    assert estado["intencion"].herramientas == ["consumo_promedio"]
+    assert estado["parametros"].insumo == "platano"
+
+    resultado = estado["resultados_herramientas"]["consumo_promedio"]
+    assert isinstance(resultado, ConsumoInsumo)
+    assert resultado.insumo == "platano"
+
+
+@pytest.mark.api
+def test_ventas_por_periodo_via_grafo_usa_el_rango_de_julio():
+    estado = _entender_y_ejecutar(
+        "¿Cómo van las ventas de julio 2026 agrupadas por producto?"
     )
 
-    assert resultado["intencion"].herramientas == ["ventas_por_periodo"]
+    assert estado["intencion"].herramientas == ["ventas_por_periodo"]
+
+    resultado = estado["resultados_herramientas"]["ventas_por_periodo"]
+    assert isinstance(resultado, ResumenVentas)
+    # valor conocido de evals/valores_base.md: ingreso total de julio 2026
+    assert resultado.total_ingresos == pytest.approx(5481.00, abs=0.01)
 
 
 @pytest.mark.api
-def test_entender_margen_por_producto():
-    resultado = entender(_estado("¿Cuál producto tuvo mejor margen en julio 2026?"))
+def test_margen_por_producto_via_grafo_usa_el_mes_correcto():
+    estado = _entender_y_ejecutar("¿Cuál producto tuvo mejor margen en julio 2026?")
 
-    assert resultado["intencion"].herramientas == ["margen_por_producto"]
-    assert resultado["parametros"].mes == "2026-07"
+    assert estado["intencion"].herramientas == ["margen_por_producto"]
+    assert estado["parametros"].mes == "2026-07"
+
+    resultado = estado["resultados_herramientas"]["margen_por_producto"]
+    assert isinstance(resultado, ListaMargenes)
 
 
 @pytest.mark.api
-def test_entender_clientes_inactivos():
-    resultado = entender(_estado("¿Qué clientes frecuentes dejaron de venir?"))
+def test_clientes_inactivos_via_grafo():
+    estado = _entender_y_ejecutar("¿Qué clientes frecuentes dejaron de venir?")
 
-    assert resultado["intencion"].herramientas == ["clientes_inactivos"]
+    assert estado["intencion"].herramientas == ["clientes_inactivos"]
+
+    resultado = estado["resultados_herramientas"]["clientes_inactivos"]
+    assert isinstance(resultado, ListaClientes)

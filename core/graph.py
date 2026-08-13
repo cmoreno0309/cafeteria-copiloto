@@ -1,11 +1,11 @@
-"""El grafo LangGraph del copiloto. Por ahora, solo el nodo entender."""
+"""El grafo LangGraph del copiloto."""
 
 import difflib
 import sqlite3
 import unicodedata
 from datetime import date
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Callable, Literal, TypedDict
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -14,6 +14,12 @@ from pydantic import BaseModel
 
 from core.config import get_gemini_api_key, get_gemini_model
 from core.db import get_conn
+from core.tools.clientes_inactivos import clientes_inactivos
+from core.tools.consumo_promedio import consumo_promedio
+from core.tools.margen_por_producto import margen_por_producto
+from core.tools.stock_actual import stock_actual
+from core.tools.sugerir_compra import sugerir_compra
+from core.tools.ventas_por_periodo import ventas_por_periodo
 
 CHECKPOINT_DB_PATH = Path("data/checkpoints.db")
 
@@ -56,6 +62,17 @@ class Intencion(BaseModel):
 class SalidaEntender(BaseModel):
     intencion: Intencion
     parametros: ParametrosPregunta
+
+
+class ErrorHerramienta(BaseModel):
+    """Marca en resultados_herramientas que una herramienta fallo.
+
+    Solo cubre ValueError (dato invalido, ej. un insumo que no existe):
+    es un error de negocio que redactar puede explicarle al usuario, no un
+    bug. Otras excepciones se propagan como crash, como corresponde.
+    """
+
+    mensaje: str
 
 
 class EstadoGrafo(TypedDict):
@@ -139,6 +156,70 @@ def entender(estado: EstadoGrafo) -> dict:
     return {"intencion": salida.intencion, "parametros": parametros}
 
 
+def _kwargs_stock_actual(p: ParametrosPregunta) -> dict:
+    return {"proveedor": p.proveedor}
+
+
+def _kwargs_consumo_promedio(p: ParametrosPregunta) -> dict:
+    return {"insumo": p.insumo}
+
+
+def _kwargs_ventas_por_periodo(p: ParametrosPregunta) -> dict:
+    return {"desde": p.desde, "hasta": p.hasta, "agrupar_por": p.agrupar_por}
+
+
+def _kwargs_margen_por_producto(p: ParametrosPregunta) -> dict:
+    return {"mes": p.mes}
+
+
+def _sin_parametros(p: ParametrosPregunta) -> dict:
+    return {}
+
+
+HERRAMIENTAS: dict[NombreHerramienta, tuple[Callable, Callable]] = {
+    "stock_actual": (stock_actual, _kwargs_stock_actual),
+    "consumo_promedio": (consumo_promedio, _kwargs_consumo_promedio),
+    "ventas_por_periodo": (ventas_por_periodo, _kwargs_ventas_por_periodo),
+    "margen_por_producto": (margen_por_producto, _kwargs_margen_por_producto),
+    "clientes_inactivos": (clientes_inactivos, _sin_parametros),
+    "sugerir_compra": (sugerir_compra, _sin_parametros),
+}
+
+
+def ejecutar_herramientas(
+    estado: EstadoGrafo, conn: sqlite3.Connection | None = None
+) -> dict:
+    """Llama la herramienta de lectura que pidio entender (caso una sola).
+
+    Si la intencion vino ambigua, no llama nada: la respuesta se redacta
+    directo a partir del motivo de ambiguedad. Un ValueError de la
+    herramienta (dato invalido, ej. insumo inexistente) no se propaga como
+    crash: queda registrado en resultados_herramientas como
+    ErrorHerramienta para que redactar lo explique.
+    """
+    intencion = estado["intencion"]
+    if intencion is None or intencion.ambigua:
+        return {"resultados_herramientas": {}}
+
+    parametros = estado["parametros"] or ParametrosPregunta()
+    conexion = conn if conn is not None else get_conn()
+    try:
+        resultados: dict = {}
+        for nombre_herramienta in intencion.herramientas:
+            funcion, construir_kwargs = HERRAMIENTAS[nombre_herramienta]
+            try:
+                resultados[nombre_herramienta] = funcion(
+                    **construir_kwargs(parametros), conn=conexion
+                )
+            except ValueError as error:
+                resultados[nombre_herramienta] = ErrorHerramienta(mensaje=str(error))
+    finally:
+        if conn is None:
+            conexion.close()
+
+    return {"resultados_herramientas": resultados}
+
+
 def _checkpointer(db_path: Path | None = None) -> SqliteSaver:
     ruta = db_path if db_path is not None else CHECKPOINT_DB_PATH
     ruta.parent.mkdir(parents=True, exist_ok=True)
@@ -149,9 +230,11 @@ def _checkpointer(db_path: Path | None = None) -> SqliteSaver:
 
 
 def construir_grafo(checkpointer: SqliteSaver | None = None) -> StateGraph:
-    """Arma el grafo. Por ahora un solo nodo: entender."""
+    """Arma el grafo: entender -> ejecutar_herramientas. Sin redactar todavia."""
     grafo = StateGraph(EstadoGrafo)
     grafo.add_node("entender", entender)
+    grafo.add_node("ejecutar_herramientas", ejecutar_herramientas)
     grafo.add_edge(START, "entender")
-    grafo.add_edge("entender", END)
+    grafo.add_edge("entender", "ejecutar_herramientas")
+    grafo.add_edge("ejecutar_herramientas", END)
     return grafo.compile(checkpointer=checkpointer or _checkpointer())
