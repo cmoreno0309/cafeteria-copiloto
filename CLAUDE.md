@@ -19,13 +19,30 @@ NO es un punto de venta. NO toma pedidos. NO cobra.
 - pytest para pruebas
 - Langfuse (contenedor local) para trazas
 - matplotlib para gráficos como imagen
+- python-dotenv para cargar variables de entorno desde `.env`
 
 No agregues dependencias sin decirlo en el resumen de la tarea.
+
+## Configuración (variables de entorno)
+
+La clave de la API de Gemini se lee de `GEMINI_API_KEY`, cargada desde un
+archivo `.env` en la raíz del proyecto vía `core/config.py`
+(usa `python-dotenv`, `load_dotenv()` se ejecuta al importar el módulo).
+
+- `.env` guarda la clave real y está en `.gitignore`. Nunca se commitea.
+- `.env.example` documenta la variable vacía y sí se commitea.
+- Para configurar: copiar `.env.example` a `.env` y completar el valor.
+- Cualquier código que necesite la clave debe llamar a
+  `core.config.get_gemini_api_key()`, no leer `os.environ` directo ni dejar
+  que falle con el error crudo de la librería de Gemini. Si la variable
+  falta, esa función lanza `RuntimeError` con un mensaje que dice qué
+  archivo copiar y completar.
 
 ## Estructura de carpetas
 
 ```
 core/
+  config.py        carga de variables de entorno (.env)
   db.py            conexión y DDL
   models.py        modelos Pydantic de entrada/salida de herramientas
   tools/           una herramienta por archivo, SQL puro, sin LLM
