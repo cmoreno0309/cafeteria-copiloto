@@ -248,6 +248,61 @@ def test_ejecutar_herramientas_error_en_periodo_de_comparacion_no_afecta_al_prin
     assert isinstance(entradas[1].resultado, ErrorHerramienta)
 
 
+def test_ejecutar_herramientas_consumo_promedio_sin_insumo_da_error_claro(conn_stock):
+    """Si la pregunta no menciona que insumo, no hay default posible: debe
+    quedar como ErrorHerramienta explicito, no como 'el insumo None no
+    existe' (el mensaje crudo que da la herramienta con insumo=None).
+    """
+    estado = _estado_con(
+        Intencion(herramientas=["consumo_promedio"], ambigua=False),
+        ParametrosPregunta(),
+    )
+
+    resultado = ejecutar_herramientas(estado, conn=conn_stock)
+
+    (entrada,) = _por_herramienta(resultado["resultados_herramientas"], "consumo_promedio")
+    assert isinstance(entrada.resultado, ErrorHerramienta)
+    assert "insumo" in entrada.resultado.mensaje
+
+
+def test_ejecutar_herramientas_ventas_por_periodo_sin_fechas_no_crashea(conn_stock):
+    """Antes de validar en el kwargs builder, desde/hasta en None llegaban
+    a la herramienta y 'desde > hasta' con None crasheaba con TypeError sin
+    que el except ValueError lo atajara.
+    """
+    estado = _estado_con(
+        Intencion(herramientas=["ventas_por_periodo"], ambigua=False),
+        ParametrosPregunta(agrupar_por="mes"),
+    )
+
+    resultado = ejecutar_herramientas(estado, conn=conn_stock)
+
+    (entrada,) = _por_herramienta(
+        resultado["resultados_herramientas"], "ventas_por_periodo"
+    )
+    assert isinstance(entrada.resultado, ErrorHerramienta)
+    assert "periodo" in entrada.resultado.mensaje
+
+
+def test_ejecutar_herramientas_margen_sin_mes_no_devuelve_vacio_silencioso(conn_stock):
+    """Sin la validacion, mes=None no levanta error en margen_por_producto:
+    la comparacion SQL contra NULL no matchea nada y devuelve una lista
+    vacia que parece (incorrectamente) 'sin margenes ese mes'.
+    """
+    estado = _estado_con(
+        Intencion(herramientas=["margen_por_producto"], ambigua=False),
+        ParametrosPregunta(),
+    )
+
+    resultado = ejecutar_herramientas(estado, conn=conn_stock)
+
+    (entrada,) = _por_herramienta(
+        resultado["resultados_herramientas"], "margen_por_producto"
+    )
+    assert isinstance(entrada.resultado, ErrorHerramienta)
+    assert "mes" in entrada.resultado.mensaje
+
+
 def _estado(pregunta: str) -> dict:
     return {
         "pregunta": pregunta,

@@ -34,14 +34,15 @@ NombreHerramienta = Literal[
 
 HERRAMIENTAS_DISPONIBLES = """
 - stock_actual(proveedor?): stock de cada insumo y si esta por debajo del minimo.
-- consumo_promedio(insumo, dias?): consumo diario promedio de un insumo.
+- consumo_promedio(insumo): consumo diario promedio de un insumo, sobre una
+  ventana fija de 14 dias (no configurable desde la pregunta).
 - ventas_por_periodo(desde, hasta, agrupar_por): ventas agrupadas por dia,
   semana, mes, producto o categoria. Si la pregunta compara dos periodos
   (ej. "julio contra junio"), llena desde/hasta con el primer periodo y
   desde_comparacion/hasta_comparacion con el segundo.
 - margen_por_producto(mes): margen de cada producto en un mes (YYYY-MM).
-- clientes_inactivos(dias?, minimo_compras?): clientes frecuentes que dejaron
-  de comprar.
+- clientes_inactivos(): clientes frecuentes que dejaron de comprar, con
+  umbrales fijos (no configurables desde la pregunta).
 - sugerir_compra(): que insumos comprar esta semana, con cantidad y urgencia.
   Ya orquesta stock y consumo internamente: para "que compro esta semana"
   no hace falta pedir stock_actual ni consumo_promedio por separado.
@@ -182,6 +183,8 @@ def _kwargs_stock_actual(p: ParametrosPregunta) -> dict:
 
 
 def _kwargs_consumo_promedio(p: ParametrosPregunta) -> dict:
+    if not p.insumo:
+        raise ValueError("no se especifico que insumo consultar")
     return {"insumo": p.insumo}
 
 
@@ -190,11 +193,37 @@ def _kwargs_ventas_por_periodo(p: ParametrosPregunta) -> dict:
     (ej. "julio comparado con junio"): la extraccion de Gemini no siempre
     lo completa cuando la pregunta no lo menciona explicitamente, y sin
     default la herramienta rechaza el llamado con un ValueError evitable.
+
+    desde/hasta, en cambio, no tienen un default razonable (adivinar un
+    periodo cambiaria el sentido de la pregunta): si faltan, se levanta
+    ValueError en vez de dejarlos pasar como None (la herramienta compara
+    fechas sin validar tipos, asi que un None ahi no da ValueError sino un
+    TypeError sin capturar).
     """
+    if p.desde is None or p.hasta is None:
+        raise ValueError("no se especifico el periodo de fechas a consultar")
     return {"desde": p.desde, "hasta": p.hasta, "agrupar_por": p.agrupar_por or "mes"}
 
 
+def _kwargs_ventas_por_periodo_comparacion(p: ParametrosPregunta) -> dict:
+    if p.desde_comparacion is None or p.hasta_comparacion is None:
+        raise ValueError("no se especifico el periodo de comparacion")
+    return {
+        "desde": p.desde_comparacion,
+        "hasta": p.hasta_comparacion,
+        "agrupar_por": p.agrupar_por or "mes",
+    }
+
+
 def _kwargs_margen_por_producto(p: ParametrosPregunta) -> dict:
+    """mes no tiene default: la consulta SQL de margen_por_producto filtra
+    por strftime('%Y-%m', fecha) = mes, y con mes=None esa comparacion
+    contra NULL simplemente no matchea nada — no levanta error, devuelve
+    una lista vacia que parece (incorrectamente) "sin margenes ese mes".
+    Por eso hace falta validar aca, no confiar en que la herramienta avise.
+    """
+    if not p.mes:
+        raise ValueError("no se especifico el mes a consultar")
     return {"mes": p.mes}
 
 
@@ -215,16 +244,24 @@ HERRAMIENTAS: dict[NombreHerramienta, tuple[Callable, Callable]] = {
 def _llamar(
     nombre_herramienta: NombreHerramienta,
     funcion: Callable,
-    kwargs: dict,
+    construir_kwargs: Callable[[ParametrosPregunta], dict],
+    parametros: ParametrosPregunta,
     conexion: sqlite3.Connection,
 ) -> ResultadoHerramienta:
-    """Ejecuta una herramienta y empaqueta el resultado (o su error) con los
-    parametros exactos que se usaron, para que quede trazable en la lista.
+    """Arma los kwargs y ejecuta la herramienta, empaquetando el resultado
+    (o su error) junto con los parametros exactos que se usaron, para que
+    quede trazable en la lista.
 
-    Un ValueError (dato invalido, ej. insumo inexistente) no se propaga
-    como crash: queda como ErrorHerramienta para que redactar lo explique.
+    Un ValueError armando los kwargs (campo obligatorio que la pregunta no
+    menciono, ej. insumo o mes) o llamando la herramienta (dato invalido,
+    ej. insumo inexistente) no se propaga como crash: queda como
+    ErrorHerramienta para que redactar lo explique. `construir_kwargs` es
+    quien decide, por herramienta, que campos tienen un default razonable
+    y cuales deben fallar en vez de dejar pasar None.
     """
+    kwargs: dict = {}
     try:
+        kwargs = construir_kwargs(parametros)
         resultado: Any = funcion(**kwargs, conn=conexion)
     except ValueError as error:
         resultado = ErrorHerramienta(mensaje=str(error))
@@ -259,7 +296,7 @@ def ejecutar_herramientas(
         for nombre_herramienta in intencion.herramientas:
             funcion, construir_kwargs = HERRAMIENTAS[nombre_herramienta]
             resultados.append(
-                _llamar(nombre_herramienta, funcion, construir_kwargs(parametros), conexion)
+                _llamar(nombre_herramienta, funcion, construir_kwargs, parametros, conexion)
             )
 
             if (
@@ -267,16 +304,12 @@ def ejecutar_herramientas(
                 and parametros.desde_comparacion is not None
                 and parametros.hasta_comparacion is not None
             ):
-                kwargs_comparacion = {
-                    "desde": parametros.desde_comparacion,
-                    "hasta": parametros.hasta_comparacion,
-                    "agrupar_por": parametros.agrupar_por or "mes",
-                }
                 resultados.append(
                     _llamar(
                         "ventas_por_periodo",
                         ventas_por_periodo,
-                        kwargs_comparacion,
+                        _kwargs_ventas_por_periodo_comparacion,
+                        parametros,
                         conexion,
                     )
                 )

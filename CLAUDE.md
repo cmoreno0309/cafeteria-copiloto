@@ -87,6 +87,24 @@ tests/             pruebas unitarias de herramientas
    modifique la base se ejecuta después de un `interrupt` del grafo, nunca antes.
 7. **Dependencia en una sola dirección:** canales → grafo → herramientas → datos.
    Nunca al revés.
+8. **Los defaults de parámetros se resuelven en el grafo, no se confía en la
+   extracción del LLM.** Gemini no siempre completa un campo aunque el prompt
+   lo describa como disponible: la extracción es no determinista, y una
+   pregunta natural puede simplemente no mencionarlo. Cada `_kwargs_*` de
+   `core/graph.py` (la función que arma los argumentos de una herramienta a
+   partir de `ParametrosPregunta`) es responsable de decidir, campo por
+   campo:
+   - Si tiene un default razonable que **no cambia el sentido de la
+     pregunta** (es una elección de formato, no de contenido — ej.
+     `agrupar_por` cae a `"mes"`), se completa ahí mismo.
+   - Si es parte de **lo que la pregunta pregunta** y no hay default posible
+     sin inventar (ej. `insumo`, `mes`, `desde`/`hasta`), la función levanta
+     `ValueError` con un mensaje claro en vez de dejar pasar `None` a la
+     herramienta. Nunca asumas que la herramienta lo va a rechazar
+     igual de bien: un `None` sin validar puede crashear con una excepción
+     que `ejecutar_herramientas` no captura (solo captura `ValueError`), o
+     peor, colar silenciosamente un resultado vacío que parece una
+     respuesta real (ej. un filtro SQL contra `NULL` que no matchea nada).
 
 ## Cómo trabajar
 
@@ -129,7 +147,7 @@ la línea de comandos pisa ese default y corre solo esas.
 - cambios al modelo de datos de `SPEC.md`
 - cambios a la firma de una herramienta
 - agregar una dependencia nueva
-- cualquier cosa que rompa una de las siete reglas de arriba
+- cualquier cosa que rompa una de las ocho reglas de arriba
 
 ## Definición de "listo" para una tarea
 
