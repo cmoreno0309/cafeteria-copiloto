@@ -359,7 +359,11 @@ def test_comparar_ventas_via_grafo_de_dos_periodos():
 
     entradas = _por_herramienta(estado["resultados_herramientas"], "ventas_por_periodo")
     assert len(entradas) == 2
-    assert all(isinstance(entrada.resultado, ResumenVentas) for entrada in entradas)
+    for entrada in entradas:
+        assert isinstance(entrada.resultado, ResumenVentas), (
+            f"parametros={entrada.parametros} devolvio "
+            f"{type(entrada.resultado).__name__}: {entrada.resultado}"
+        )
 
 
 @pytest.mark.api

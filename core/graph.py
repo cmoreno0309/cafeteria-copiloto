@@ -186,7 +186,12 @@ def _kwargs_consumo_promedio(p: ParametrosPregunta) -> dict:
 
 
 def _kwargs_ventas_por_periodo(p: ParametrosPregunta) -> dict:
-    return {"desde": p.desde, "hasta": p.hasta, "agrupar_por": p.agrupar_por}
+    """agrupar_por cae a 'mes' si la pregunta no especifica como agrupar
+    (ej. "julio comparado con junio"): la extraccion de Gemini no siempre
+    lo completa cuando la pregunta no lo menciona explicitamente, y sin
+    default la herramienta rechaza el llamado con un ValueError evitable.
+    """
+    return {"desde": p.desde, "hasta": p.hasta, "agrupar_por": p.agrupar_por or "mes"}
 
 
 def _kwargs_margen_por_producto(p: ParametrosPregunta) -> dict:
@@ -265,7 +270,7 @@ def ejecutar_herramientas(
                 kwargs_comparacion = {
                     "desde": parametros.desde_comparacion,
                     "hasta": parametros.hasta_comparacion,
-                    "agrupar_por": parametros.agrupar_por,
+                    "agrupar_por": parametros.agrupar_por or "mes",
                 }
                 resultados.append(
                     _llamar(
