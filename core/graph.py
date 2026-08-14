@@ -5,7 +5,7 @@ import sqlite3
 import unicodedata
 from datetime import date
 from pathlib import Path
-from typing import Callable, Literal, TypedDict
+from typing import Any, Callable, Literal, TypedDict
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -36,11 +36,15 @@ HERRAMIENTAS_DISPONIBLES = """
 - stock_actual(proveedor?): stock de cada insumo y si esta por debajo del minimo.
 - consumo_promedio(insumo, dias?): consumo diario promedio de un insumo.
 - ventas_por_periodo(desde, hasta, agrupar_por): ventas agrupadas por dia,
-  semana, mes, producto o categoria.
+  semana, mes, producto o categoria. Si la pregunta compara dos periodos
+  (ej. "julio contra junio"), llena desde/hasta con el primer periodo y
+  desde_comparacion/hasta_comparacion con el segundo.
 - margen_por_producto(mes): margen de cada producto en un mes (YYYY-MM).
 - clientes_inactivos(dias?, minimo_compras?): clientes frecuentes que dejaron
   de comprar.
 - sugerir_compra(): que insumos comprar esta semana, con cantidad y urgencia.
+  Ya orquesta stock y consumo internamente: para "que compro esta semana"
+  no hace falta pedir stock_actual ni consumo_promedio por separado.
 """
 
 
@@ -50,6 +54,8 @@ class ParametrosPregunta(BaseModel):
     mes: str | None = None
     desde: date | None = None
     hasta: date | None = None
+    desde_comparacion: date | None = None
+    hasta_comparacion: date | None = None
     agrupar_por: str | None = None
 
 
@@ -75,11 +81,26 @@ class ErrorHerramienta(BaseModel):
     mensaje: str
 
 
+class ResultadoHerramienta(BaseModel):
+    """Una llamada a una herramienta: que se llamo, con que parametros
+    exactos, y que devolvio.
+
+    `resultado` es el modelo propio de la herramienta (ListaStock,
+    ConsumoInsumo, etc.) si la llamada tuvo exito, o ErrorHerramienta si
+    fallo. Se tipa `Any` porque no hay una jerarquia comun entre los
+    modelos de salida de core/tools.
+    """
+
+    herramienta: NombreHerramienta
+    parametros: dict
+    resultado: Any
+
+
 class EstadoGrafo(TypedDict):
     pregunta: str
     intencion: Intencion | None
     parametros: ParametrosPregunta | None
-    resultados_herramientas: dict
+    resultados_herramientas: list[ResultadoHerramienta]
     accion_propuesta: dict | None
     aprobacion: dict | None
     respuesta: str | None
@@ -186,33 +207,74 @@ HERRAMIENTAS: dict[NombreHerramienta, tuple[Callable, Callable]] = {
 }
 
 
+def _llamar(
+    nombre_herramienta: NombreHerramienta,
+    funcion: Callable,
+    kwargs: dict,
+    conexion: sqlite3.Connection,
+) -> ResultadoHerramienta:
+    """Ejecuta una herramienta y empaqueta el resultado (o su error) con los
+    parametros exactos que se usaron, para que quede trazable en la lista.
+
+    Un ValueError (dato invalido, ej. insumo inexistente) no se propaga
+    como crash: queda como ErrorHerramienta para que redactar lo explique.
+    """
+    try:
+        resultado: Any = funcion(**kwargs, conn=conexion)
+    except ValueError as error:
+        resultado = ErrorHerramienta(mensaje=str(error))
+    return ResultadoHerramienta(
+        herramienta=nombre_herramienta, parametros=kwargs, resultado=resultado
+    )
+
+
 def ejecutar_herramientas(
     estado: EstadoGrafo, conn: sqlite3.Connection | None = None
 ) -> dict:
-    """Llama la herramienta de lectura que pidio entender (caso una sola).
+    """Llama las herramientas de lectura que pidio entender.
 
     Si la intencion vino ambigua, no llama nada: la respuesta se redacta
-    directo a partir del motivo de ambiguedad. Un ValueError de la
-    herramienta (dato invalido, ej. insumo inexistente) no se propaga como
-    crash: queda registrado en resultados_herramientas como
-    ErrorHerramienta para que redactar lo explique.
+    directo a partir del motivo de ambiguedad. Cada llamada arma su propia
+    entrada en la lista (herramienta, parametros usados, resultado), asi
+    que una herramienta que falla no afecta a las demas: no hay una unica
+    entrada compartida que se pueda pisar.
+
+    Caso especial: si se pide ventas_por_periodo y la pregunta trae un
+    segundo periodo para comparar (desde_comparacion/hasta_comparacion),
+    se agrega una segunda entrada con esos parametros.
     """
     intencion = estado["intencion"]
     if intencion is None or intencion.ambigua:
-        return {"resultados_herramientas": {}}
+        return {"resultados_herramientas": []}
 
     parametros = estado["parametros"] or ParametrosPregunta()
     conexion = conn if conn is not None else get_conn()
     try:
-        resultados: dict = {}
+        resultados: list[ResultadoHerramienta] = []
         for nombre_herramienta in intencion.herramientas:
             funcion, construir_kwargs = HERRAMIENTAS[nombre_herramienta]
-            try:
-                resultados[nombre_herramienta] = funcion(
-                    **construir_kwargs(parametros), conn=conexion
+            resultados.append(
+                _llamar(nombre_herramienta, funcion, construir_kwargs(parametros), conexion)
+            )
+
+            if (
+                nombre_herramienta == "ventas_por_periodo"
+                and parametros.desde_comparacion is not None
+                and parametros.hasta_comparacion is not None
+            ):
+                kwargs_comparacion = {
+                    "desde": parametros.desde_comparacion,
+                    "hasta": parametros.hasta_comparacion,
+                    "agrupar_por": parametros.agrupar_por,
+                }
+                resultados.append(
+                    _llamar(
+                        "ventas_por_periodo",
+                        ventas_por_periodo,
+                        kwargs_comparacion,
+                        conexion,
+                    )
                 )
-            except ValueError as error:
-                resultados[nombre_herramienta] = ErrorHerramienta(mensaje=str(error))
     finally:
         if conn is None:
             conexion.close()

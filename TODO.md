@@ -30,7 +30,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 
 - [x] **1.9** Nodo `entender` con salida Pydantic + checkpointer SQLite
 - [x] **1.10** Nodo `ejecutar_herramientas` (caso simple: una herramienta)
-- [ ] **1.11** Caso multi-herramienta: "¿qué compro esta semana?"
+- [x] **1.11** Caso multi-herramienta: "¿qué compro esta semana?"
 - [ ] **1.12** Nodo `redactar` — probar que no invente números que no vinieron
       de una herramienta
 - [ ] **1.13** Rama de escritura con `interrupt` y reanudación por `thread_id`

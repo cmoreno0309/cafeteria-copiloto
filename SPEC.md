@@ -154,8 +154,10 @@ grafo arme la orden propuesta sin lógica intermedia.
 1. **entender** — clasifica la intención y extrae parámetros (fechas, categoría,
    insumo). Salida Pydantic, no texto.
 2. **ejecutar_herramientas** — llama una o varias herramientas de lectura. Puede
-   iterar: para "qué compro esta semana" llama `stock_actual`, luego
-   `consumo_promedio` por cada insumo bajo mínimo.
+   iterar: para comparar dos periodos de ventas llama `ventas_por_periodo` dos
+   veces, una por periodo. Para "qué compro esta semana" llama `sugerir_compra`
+   directo (esa herramienta ya orquesta `stock_actual` y `consumo_promedio`
+   internamente); el grafo no repite esa lógica.
 3. **decidir** — ¿la respuesta es informativa o hay una acción propuesta?
    - informativa → va a `redactar`
    - acción → va a `proponer_accion`
@@ -167,7 +169,13 @@ grafo arme la orden propuesta sin lógica intermedia.
    devolvieron las herramientas.
 
 Estado del grafo: `pregunta, intencion, parametros, resultados_herramientas,
-accion_propuesta, aprobacion, respuesta`.
+accion_propuesta, aprobacion, respuesta`. `resultados_herramientas` es una
+lista de entradas `{herramienta, parametros, resultado}`, no un diccionario
+por nombre: así una misma herramienta puede llamarse más de una vez (por
+ejemplo, `ventas_por_periodo` para dos periodos a comparar) y cada llamada
+queda trazable por separado, con los parámetros exactos que la produjeron.
+`resultado` es el modelo propio de la herramienta o un `ErrorHerramienta` si
+la llamada falló; una entrada que falla no afecta a las demás.
 
 Persistencia: checkpointer de SQLite, para que la pausa sobreviva a un reinicio.
 
