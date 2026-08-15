@@ -33,7 +33,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 - [x] **1.11** Caso multi-herramienta: "¿qué compro esta semana?"
 - [x] **1.12** Nodo `redactar` — probar que no invente números que no vinieron
       de una herramienta
-- [ ] **1.13** Rama de escritura con `interrupt` y reanudación por `thread_id`
+- [x] **1.13** Rama de escritura con `interrupt` y reanudación por `thread_id`
 - [ ] **1.14** Probar el ciclo completo a mano: pregunta → propuesta → pausa →
       aprobación → registro en `ordenes_compra`
 

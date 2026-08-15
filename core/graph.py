@@ -1,25 +1,40 @@
 """El grafo LangGraph del copiloto."""
 
 import difflib
+import logging
 import sqlite3
 import unicodedata
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Literal, TypedDict
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 from pydantic import BaseModel
 
 from core.config import get_gemini_api_key, get_gemini_model
 from core.db import get_conn
+from core.models import (
+    Aprobacion,
+    ConsumoInsumo,
+    ItemOrden,
+    ListaClientes,
+    ListaMargenes,
+    ListaStock,
+    ListaSugerencias,
+    ResumenVentas,
+)
 from core.tools.clientes_inactivos import clientes_inactivos
 from core.tools.consumo_promedio import consumo_promedio
+from core.tools.crear_orden_compra import crear_orden_compra
 from core.tools.margen_por_producto import margen_por_producto
 from core.tools.stock_actual import stock_actual
 from core.tools.sugerir_compra import sugerir_compra
 from core.tools.ventas_por_periodo import ventas_por_periodo
+
+logger = logging.getLogger(__name__)
 
 CHECKPOINT_DB_PATH = Path("data/checkpoints.db")
 
@@ -48,6 +63,15 @@ HERRAMIENTAS_DISPONIBLES = """
   no hace falta pedir stock_actual ni consumo_promedio por separado.
 """
 
+REGLA_ACCION = (
+    "Ademas de las herramientas, marca accion=True solo si la pregunta es "
+    "un pedido imperativo de EJECUTAR una compra ('arma la orden de compra "
+    "de frutas', 'compra lo que falta'), no una pregunta informativa "
+    "('que deberia comprar esta semana', '¿cuanto necesito comprar?'). "
+    "Ambas pueden usar sugerir_compra como herramienta; la diferencia es la "
+    "intencion, no la herramienta. Por defecto accion=False."
+)
+
 
 class ParametrosPregunta(BaseModel):
     insumo: str | None = None
@@ -64,6 +88,7 @@ class Intencion(BaseModel):
     herramientas: list[NombreHerramienta]
     ambigua: bool
     motivo: str | None = None
+    accion: bool = False
 
 
 class SalidaEntender(BaseModel):
@@ -86,15 +111,53 @@ class ResultadoHerramienta(BaseModel):
     """Una llamada a una herramienta: que se llamo, con que parametros
     exactos, y que devolvio.
 
-    `resultado` es el modelo propio de la herramienta (ListaStock,
-    ConsumoInsumo, etc.) si la llamada tuvo exito, o ErrorHerramienta si
-    fallo. Se tipa `Any` porque no hay una jerarquia comun entre los
-    modelos de salida de core/tools.
+    `resultado` tipa el Union de los modelos de salida reales de
+    core/tools, no `Any`: el checkpointer serializa y deserializa el
+    estado completo cada vez que el grafo se pausa con `interrupt` y se
+    retoma en un `invoke()` distinto, y un campo `Any` no le da a Pydantic
+    forma de saber a que subtipo reconstruir el dict que vuelve — se
+    degrada a un dict plano en cuanto se relee desde el checkpoint. Con el
+    Union explicito, Pydantic reconstruye el modelo correcto (ningun par
+    de estos modelos comparte el mismo conjunto de campos obligatorios).
     """
 
     herramienta: NombreHerramienta
     parametros: dict
-    resultado: Any
+    resultado: (
+        ListaStock
+        | ConsumoInsumo
+        | ResumenVentas
+        | ListaMargenes
+        | ListaClientes
+        | ListaSugerencias
+        | ErrorHerramienta
+    )
+
+
+class ItemPropuesto(BaseModel):
+    insumo: str
+    cantidad: float
+    unidad: str
+    costo_unitario_estimado: float
+    urgencia: str
+
+
+class PropuestaCompra(BaseModel):
+    """Payload completo del interrupt: todo lo que un canal necesita para
+    mostrar la propuesta sin volver a consultar nada.
+    """
+
+    proveedor: str
+    items: list[ItemPropuesto]
+    total_estimado: float
+
+
+class DecisionAprobacion(BaseModel):
+    """Forma validada del valor de resume que manda el canal al reanudar."""
+
+    aprobada: bool
+    aprobada_por: str | None = None
+    aprobada_en: datetime | None = None
 
 
 class EstadoGrafo(TypedDict):
@@ -102,8 +165,8 @@ class EstadoGrafo(TypedDict):
     intencion: Intencion | None
     parametros: ParametrosPregunta | None
     resultados_herramientas: list[ResultadoHerramienta]
-    accion_propuesta: dict | None
-    aprobacion: dict | None
+    accion_propuesta: PropuestaCompra | None
+    aprobacion: DecisionAprobacion | None
     respuesta: str | None
 
 
@@ -154,6 +217,7 @@ def _clasificar(pregunta: str, hoy: date | None = None) -> SalidaEntender:
         f"Hoy es {fecha_ancla.isoformat()}. Resolvé fechas relativas "
         "('esta semana', 'el mes pasado') a fechas o meses absolutos.\n\n"
         f"Herramientas disponibles:{HERRAMIENTAS_DISPONIBLES}\n"
+        f"{REGLA_ACCION}\n\n"
         "Si la pregunta es ambigua o ninguna herramienta la responde, marca "
         "ambigua=True y explica por que en motivo, en vez de adivinar.\n\n"
         f"Pregunta: {pregunta}"
@@ -320,6 +384,157 @@ def ejecutar_herramientas(
     return {"resultados_herramientas": resultados}
 
 
+def _decidir_siguiente_nodo(estado: EstadoGrafo) -> Literal["proponer_accion", "redactar"]:
+    """Ruta al camino de escritura solo si la intencion pide ejecutar una
+    accion, no esta ambigua, y realmente llamo sugerir_compra (si Gemini
+    marco accion=True sin pedir esa herramienta, es un estado inconsistente:
+    cae a redactar en vez de crashear mas adelante buscando un resultado
+    que no esta).
+    """
+    intencion = estado["intencion"]
+    if (
+        intencion is not None
+        and not intencion.ambigua
+        and intencion.accion
+        and "sugerir_compra" in intencion.herramientas
+    ):
+        return "proponer_accion"
+    return "redactar"
+
+
+def _coincide_proveedor(pedido: str, candidato: str) -> bool:
+    return _sin_tildes(pedido) in _sin_tildes(candidato)
+
+
+def _construir_propuesta(estado: EstadoGrafo) -> PropuestaCompra | str:
+    """Arma la PropuestaCompra lista para el interrupt, o devuelve un
+    mensaje de aclaracion (str) si no se puede resolver a un solo
+    proveedor sin adivinar. Una orden es de un proveedor a la vez
+    (crear_orden_compra toma proveedor: str), asi que si sugerir_compra
+    trae mas de uno pendiente y la pregunta no distingue cual, no hay
+    forma segura de elegir.
+    """
+    (entrada,) = [
+        r for r in estado["resultados_herramientas"] if r.herramienta == "sugerir_compra"
+    ]
+    if isinstance(entrada.resultado, ErrorHerramienta):
+        return f"No pude armar la propuesta: {entrada.resultado.mensaje}"
+
+    proveedores = entrada.resultado.proveedores
+    proveedor_pedido = (estado["parametros"] or ParametrosPregunta()).proveedor
+    candidatos = (
+        [p for p in proveedores if _coincide_proveedor(proveedor_pedido, p.proveedor)]
+        if proveedor_pedido
+        else proveedores
+    )
+
+    if not candidatos:
+        return "No hay nada pendiente de comprar de ese proveedor esta semana."
+    if len(candidatos) > 1:
+        nombres = ", ".join(p.proveedor for p in candidatos)
+        return f"Hay compras pendientes de varios proveedores ({nombres}). ¿De cuál armo la orden?"
+
+    elegido = candidatos[0]
+    items = [ItemPropuesto(**item.model_dump()) for item in elegido.items]
+    total = round(sum(item.cantidad * item.costo_unitario_estimado for item in items), 2)
+    return PropuestaCompra(proveedor=elegido.proveedor, items=items, total_estimado=total)
+
+
+def proponer_accion(estado: EstadoGrafo) -> dict:
+    """Arma la propuesta y pausa el grafo con interrupt para que un humano
+    apruebe o rechace.
+
+    Si no se puede armar una propuesta sin ambiguedad (0 o >1 proveedores
+    candidatos, o sugerir_compra fallo), no llama interrupt: responde
+    directo con la aclaracion, igual que el camino de ambiguedad de
+    redactar.
+
+    LangGraph re-ejecuta este nodo entero al reanudar (confirmado contra
+    LangGraph 1.2.10): la segunda vez, interrupt() devuelve el valor de
+    resume en vez de pausar. _construir_propuesta es determinista y solo
+    lee resultados_herramientas (el snapshot que ejecutar_herramientas ya
+    calculo antes de la pausa) — nunca vuelve a llamar sugerir_compra — asi
+    que la propuesta recalculada al reanudar es identica, bit a bit, a la
+    que se mostro en el interrupt.
+    """
+    propuesta = _construir_propuesta(estado)
+    if isinstance(propuesta, str):
+        return {"respuesta": propuesta}
+
+    decision_cruda = interrupt(propuesta.model_dump(mode="json"))
+    decision = DecisionAprobacion.model_validate(decision_cruda)
+    return {"accion_propuesta": propuesta, "aprobacion": decision}
+
+
+def _detectar_drift(propuesta: PropuestaCompra, conexion: sqlite3.Connection) -> str | None:
+    """Compara la propuesta ya aprobada contra lo que sugerir_compra diria
+    ahora mismo. Solo informa: la orden que se inserta siempre es la que
+    se aprobo, esto nunca cambia ese resultado. Si el stock se movio entre
+    la pausa y la aprobacion, esto lo deja registrado en vez de que pase
+    desapercibido.
+    """
+    vigente = sugerir_compra(conn=conexion)
+    items_vigentes = {
+        item.insumo: item.cantidad
+        for proveedor in vigente.proveedores
+        for item in proveedor.items
+        if proveedor.proveedor == propuesta.proveedor
+    }
+    diferencias = []
+    for item in propuesta.items:
+        cantidad_vigente = items_vigentes.pop(item.insumo, None)
+        if cantidad_vigente is None:
+            diferencias.append(f"{item.insumo} ya no esta entre lo sugerido")
+        elif cantidad_vigente != item.cantidad:
+            diferencias.append(
+                f"{item.insumo}: se aprobaron {item.cantidad}, ahora sugeriria {cantidad_vigente}"
+            )
+    if items_vigentes:
+        diferencias.append(f"tambien aparecio(n): {', '.join(sorted(items_vigentes))}")
+    return "; ".join(diferencias) if diferencias else None
+
+
+def aplicar_accion(estado: EstadoGrafo, conn: sqlite3.Connection | None = None) -> dict:
+    """Al reanudar: si se aprobo, inserta la orden con los items que se
+    propusieron (nunca un recalculo); si se rechazo, registra el estado
+    sin insertar nada.
+    """
+    propuesta = estado["accion_propuesta"]
+    if propuesta is None:
+        return {}  # proponer_accion ya resolvio (ambiguedad o nada que proponer)
+
+    decision = estado["aprobacion"]
+    if decision is None or not decision.aprobada:
+        return {"respuesta": f"Orden de {propuesta.proveedor} no creada: quedó rechazada."}
+    if not decision.aprobada_por:
+        return {"respuesta": "Falta quién aprueba la orden; no se creó."}
+
+    items = [
+        ItemOrden(insumo=item.insumo, cantidad=item.cantidad, unidad=item.unidad)
+        for item in propuesta.items
+    ]
+    aprobacion_tool = Aprobacion(
+        aprobada_por=decision.aprobada_por,
+        aprobada_en=decision.aprobada_en or datetime.now(),
+    )
+    conexion = conn if conn is not None else get_conn()
+    try:
+        orden = crear_orden_compra(
+            propuesta.proveedor, items, aprobacion=aprobacion_tool, conn=conexion
+        )
+        respuesta = f"Orden #{orden.id} creada para {orden.proveedor}: {len(orden.items)} items."
+
+        drift = _detectar_drift(propuesta, conexion)
+        if drift:
+            logger.warning("orden #%s aprobada con datos desactualizados: %s", orden.id, drift)
+            respuesta += f" Aviso: el stock cambió desde que se propuso ({drift})."
+    finally:
+        if conn is None:
+            conexion.close()
+
+    return {"respuesta": respuesta}
+
+
 class SalidaRedactar(BaseModel):
     respuesta: str
 
@@ -423,13 +638,25 @@ def _checkpointer(db_path: Path | None = None) -> SqliteSaver:
 
 
 def construir_grafo(checkpointer: SqliteSaver | None = None) -> StateGraph:
-    """Arma el grafo: entender -> ejecutar_herramientas -> redactar."""
+    """Arma el grafo:
+
+    entender -> ejecutar_herramientas -> [decidir] -> redactar -> END
+                                                     -> proponer_accion -> aplicar_accion -> END
+    """
     grafo = StateGraph(EstadoGrafo)
     grafo.add_node("entender", entender)
     grafo.add_node("ejecutar_herramientas", ejecutar_herramientas)
+    grafo.add_node("proponer_accion", proponer_accion)
+    grafo.add_node("aplicar_accion", aplicar_accion)
     grafo.add_node("redactar", redactar)
     grafo.add_edge(START, "entender")
     grafo.add_edge("entender", "ejecutar_herramientas")
-    grafo.add_edge("ejecutar_herramientas", "redactar")
+    grafo.add_conditional_edges(
+        "ejecutar_herramientas",
+        _decidir_siguiente_nodo,
+        {"proponer_accion": "proponer_accion", "redactar": "redactar"},
+    )
+    grafo.add_edge("proponer_accion", "aplicar_accion")
+    grafo.add_edge("aplicar_accion", END)
     grafo.add_edge("redactar", END)
     return grafo.compile(checkpointer=checkpointer or _checkpointer())

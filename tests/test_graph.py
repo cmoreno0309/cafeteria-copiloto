@@ -1,24 +1,32 @@
 """Pruebas de core/graph.py: estado, nodo entender y checkpointer."""
 
+import json
 import re
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
+from langgraph.types import Command
 
 from core.db import get_conn, init_db
 from core.graph import (
+    DecisionAprobacion,
     ErrorHerramienta,
     Intencion,
+    ItemPropuesto,
     ParametrosPregunta,
+    PropuestaCompra,
     ResultadoHerramienta,
     SalidaEntender,
     SalidaRedactar,
     _checkpointer,
+    _construir_propuesta,
+    aplicar_accion,
     construir_grafo,
     ejecutar_herramientas,
     entender,
     normalizar_insumo,
+    proponer_accion,
     redactar,
 )
 from core.models import (
@@ -30,6 +38,7 @@ from core.models import (
     ListaSugerencias,
     ResumenVentas,
 )
+from core.tools.sugerir_compra import sugerir_compra
 
 HOY = date(2026, 8, 13)
 
@@ -586,3 +595,335 @@ def test_redactar_no_inventa_numeros_fuera_del_resultado():
             f"la respuesta menciona {numero}, que no aparece en el resultado "
             f"({numeros_validos}): {respuesta!r}"
         )
+
+
+# --- 1.13: rama de escritura (proponer_accion / aplicar_accion) ---
+
+
+def _sembrar_insumo_con_ventas_recientes(
+    conexion: sqlite3.Connection,
+    insumo: str,
+    proveedor: str,
+    producto: str,
+    dias_con_venta: list[int],
+    cantidad_por_venta: int = 4,
+) -> None:
+    """Un insumo bajo minimo con ventas recientes (relativas a hoy, para
+    no depender de una fecha fija), suficiente para que sugerir_compra
+    tenga algo concreto y determinista que proponer.
+    """
+    (insumo_id,) = conexion.execute(
+        "INSERT INTO insumos (nombre, unidad, stock_actual, stock_minimo, "
+        "costo_unitario, proveedor) VALUES (?, 'kg', 0.5, 5.0, 2.0, ?) "
+        "RETURNING id",
+        (insumo, proveedor),
+    ).fetchone()
+    (producto_id,) = conexion.execute(
+        "INSERT INTO productos (nombre, categoria, precio_venta) "
+        "VALUES (?, 'batido', 5.0) RETURNING id",
+        (producto,),
+    ).fetchone()
+    conexion.execute(
+        "INSERT INTO recetas (producto_id, insumo_id, cantidad) VALUES (?, ?, 0.5)",
+        (producto_id, insumo_id),
+    )
+    hoy = date.today()
+    conexion.executemany(
+        "INSERT INTO ventas (producto_id, cantidad, precio_unitario, fecha) "
+        "VALUES (?, ?, 5.0, ?)",
+        [
+            (producto_id, cantidad_por_venta, (hoy - timedelta(days=d)).isoformat())
+            for d in dias_con_venta
+        ],
+    )
+
+
+@pytest.fixture
+def ruta_compra(tmp_path):
+    """Una base con un solo proveedor pendiente (Mercado de Frutas /
+    fresa): sugerir_compra da exactamente una propuesta sin ambiguedad.
+    """
+    ruta = tmp_path / "compra.db"
+    init_db(ruta)
+    conexion = get_conn(ruta)
+    _sembrar_insumo_con_ventas_recientes(
+        conexion, "fresa", "Mercado de Frutas", "batido de fresa", [1, 3, 5]
+    )
+    conexion.commit()
+    conexion.close()
+    return ruta
+
+
+@pytest.fixture
+def ruta_compra_multi_proveedor(tmp_path):
+    """Dos proveedores con algo pendiente a la vez: fresa (Mercado de
+    Frutas) y leche (Lacteos Norte)."""
+    ruta = tmp_path / "compra_multi.db"
+    init_db(ruta)
+    conexion = get_conn(ruta)
+    _sembrar_insumo_con_ventas_recientes(
+        conexion, "fresa", "Mercado de Frutas", "batido de fresa", [1, 3, 5]
+    )
+    _sembrar_insumo_con_ventas_recientes(
+        conexion, "leche", "Lacteos Norte", "cafe con leche", [1, 3, 5]
+    )
+    conexion.commit()
+    conexion.close()
+    return ruta
+
+
+def _resultado_sugerir_compra(conexion: sqlite3.Connection) -> ResultadoHerramienta:
+    return ResultadoHerramienta(
+        herramienta="sugerir_compra", parametros={}, resultado=sugerir_compra(conn=conexion)
+    )
+
+
+def _salida_accion(proveedor: str | None = None) -> SalidaEntender:
+    return SalidaEntender(
+        intencion=Intencion(herramientas=["sugerir_compra"], ambigua=False, accion=True),
+        parametros=ParametrosPregunta(proveedor=proveedor),
+    )
+
+
+def test_construir_propuesta_arma_la_propuesta_desde_sugerir_compra(ruta_compra):
+    conexion = get_conn(ruta_compra)
+    try:
+        estado = _estado_con(
+            Intencion(herramientas=["sugerir_compra"], ambigua=False, accion=True)
+        )
+        estado["resultados_herramientas"] = [_resultado_sugerir_compra(conexion)]
+
+        propuesta = _construir_propuesta(estado)
+
+        assert isinstance(propuesta, PropuestaCompra)
+        assert propuesta.proveedor == "Mercado de Frutas"
+        (item,) = propuesta.items
+        assert item.insumo == "fresa"
+        assert item.cantidad == 28.0
+        assert propuesta.total_estimado == pytest.approx(28.0 * 2.0, abs=0.01)
+    finally:
+        conexion.close()
+
+
+def test_construir_propuesta_sin_nada_pendiente_pide_aclaracion(tmp_path):
+    ruta = tmp_path / "vacio.db"
+    init_db(ruta)
+    conexion = get_conn(ruta)
+    try:
+        estado = _estado_con(
+            Intencion(herramientas=["sugerir_compra"], ambigua=False, accion=True)
+        )
+        estado["resultados_herramientas"] = [_resultado_sugerir_compra(conexion)]
+
+        propuesta = _construir_propuesta(estado)
+
+        assert isinstance(propuesta, str)
+        assert "no hay" in propuesta.lower()
+    finally:
+        conexion.close()
+
+
+def test_construir_propuesta_con_varios_proveedores_sin_filtro_pide_aclaracion(
+    ruta_compra_multi_proveedor,
+):
+    conexion = get_conn(ruta_compra_multi_proveedor)
+    try:
+        resultado = sugerir_compra(conn=conexion)
+        assert len(resultado.proveedores) == 2  # el fixture debe generar la ambiguedad
+
+        estado = _estado_con(
+            Intencion(herramientas=["sugerir_compra"], ambigua=False, accion=True)
+        )
+        estado["resultados_herramientas"] = [
+            ResultadoHerramienta(herramienta="sugerir_compra", parametros={}, resultado=resultado)
+        ]
+
+        propuesta = _construir_propuesta(estado)
+
+        assert isinstance(propuesta, str)
+        assert "varios proveedores" in propuesta.lower()
+    finally:
+        conexion.close()
+
+
+def test_proponer_accion_no_llama_interrupt_si_la_propuesta_es_ambigua(
+    ruta_compra_multi_proveedor, monkeypatch
+):
+    def _fallar_si_se_llama(payload):
+        raise AssertionError(
+            "proponer_accion no deberia llamar interrupt si la propuesta es ambigua"
+        )
+
+    monkeypatch.setattr("core.graph.interrupt", _fallar_si_se_llama)
+
+    conexion = get_conn(ruta_compra_multi_proveedor)
+    try:
+        estado = _estado_con(
+            Intencion(herramientas=["sugerir_compra"], ambigua=False, accion=True)
+        )
+        estado["resultados_herramientas"] = [_resultado_sugerir_compra(conexion)]
+
+        resultado = proponer_accion(estado)
+
+        assert resultado.get("accion_propuesta") is None
+        assert resultado["respuesta"]
+    finally:
+        conexion.close()
+
+
+def test_proponer_accion_via_grafo_pausa_y_no_inserta_nada(tmp_path, monkeypatch, ruta_compra):
+    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
+
+    checkpointer = _checkpointer(tmp_path / "checkpoints.db")
+    grafo = construir_grafo(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": "hilo-frutas"}}
+
+    resultado = grafo.invoke(_estado("arma la orden de compra de frutas"), config=config)
+
+    assert "__interrupt__" in resultado
+    payload = resultado["__interrupt__"][0].value
+    assert payload["proveedor"] == "Mercado de Frutas"
+    assert payload["items"][0]["insumo"] == "fresa"
+    assert payload["items"][0]["cantidad"] == 28.0
+    assert payload["items"][0]["urgencia"]
+    assert "total_estimado" in payload
+
+    conexion = get_conn(ruta_compra)
+    (total,) = conexion.execute("SELECT COUNT(*) FROM ordenes_compra").fetchone()
+    conexion.close()
+    assert total == 0
+
+
+def test_grafo_reanudado_con_aprobacion_inserta_una_fila(tmp_path, monkeypatch, ruta_compra):
+    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
+
+    checkpointer = _checkpointer(tmp_path / "checkpoints.db")
+    grafo = construir_grafo(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": "hilo-frutas"}}
+    grafo.invoke(_estado("arma la orden de compra de frutas"), config=config)
+
+    resultado = grafo.invoke(
+        Command(resume={"aprobada": True, "aprobada_por": "dueña"}), config=config
+    )
+
+    conexion = get_conn(ruta_compra)
+    (total,) = conexion.execute("SELECT COUNT(*) FROM ordenes_compra").fetchone()
+    (detalle_json,) = conexion.execute(
+        "SELECT detalle_json FROM ordenes_compra"
+    ).fetchone()
+    conexion.close()
+
+    assert total == 1
+    assert "Mercado de Frutas" in resultado["respuesta"]
+    items = json.loads(detalle_json)
+    assert items[0]["insumo"] == "fresa"
+    assert items[0]["cantidad"] == 28.0
+
+
+def test_grafo_reanudado_con_rechazo_no_inserta(tmp_path, monkeypatch, ruta_compra):
+    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
+
+    checkpointer = _checkpointer(tmp_path / "checkpoints.db")
+    grafo = construir_grafo(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": "hilo-frutas"}}
+    grafo.invoke(_estado("arma la orden de compra de frutas"), config=config)
+
+    resultado = grafo.invoke(Command(resume={"aprobada": False}), config=config)
+
+    conexion = get_conn(ruta_compra)
+    (total,) = conexion.execute("SELECT COUNT(*) FROM ordenes_compra").fetchone()
+    conexion.close()
+
+    assert total == 0
+    assert "rechaz" in resultado["respuesta"].lower()
+
+
+def test_dos_threads_en_pausa_no_se_pisan(tmp_path, monkeypatch, ruta_compra_multi_proveedor):
+    def _clasificar_canned(pregunta, hoy=None):
+        if "frutas" in pregunta:
+            return _salida_accion(proveedor="Mercado de Frutas")
+        return _salida_accion(proveedor="Lacteos Norte")
+
+    monkeypatch.setattr("core.graph._clasificar", _clasificar_canned)
+    monkeypatch.setattr(
+        "core.graph.get_conn", lambda: get_conn(ruta_compra_multi_proveedor)
+    )
+
+    checkpointer = _checkpointer(tmp_path / "checkpoints.db")
+    grafo = construir_grafo(checkpointer=checkpointer)
+    config_1 = {"configurable": {"thread_id": "hilo-frutas"}}
+    config_2 = {"configurable": {"thread_id": "hilo-lacteos"}}
+
+    grafo.invoke(_estado("arma la orden de compra de frutas"), config=config_1)
+    grafo.invoke(_estado("arma la orden de compra de lacteos"), config=config_2)
+
+    assert grafo.get_state(config_1).next == ("proponer_accion",)
+    assert grafo.get_state(config_2).next == ("proponer_accion",)
+    propuesta_1 = grafo.get_state(config_1).tasks[0].interrupts[0].value
+    propuesta_2 = grafo.get_state(config_2).tasks[0].interrupts[0].value
+    assert propuesta_1["proveedor"] == "Mercado de Frutas"
+    assert propuesta_2["proveedor"] == "Lacteos Norte"
+
+    grafo.invoke(
+        Command(resume={"aprobada": True, "aprobada_por": "dueña"}), config=config_1
+    )
+
+    conexion = get_conn(ruta_compra_multi_proveedor)
+    (total,) = conexion.execute("SELECT COUNT(*) FROM ordenes_compra").fetchone()
+    (proveedor_insertado,) = conexion.execute(
+        "SELECT proveedor FROM ordenes_compra"
+    ).fetchone()
+    conexion.close()
+
+    assert total == 1
+    assert proveedor_insertado == "Mercado de Frutas"
+    # el hilo 2 sigue pausado con su propia propuesta, sin tocar
+    assert grafo.get_state(config_2).next == ("proponer_accion",)
+    assert (
+        grafo.get_state(config_2).tasks[0].interrupts[0].value["proveedor"]
+        == "Lacteos Norte"
+    )
+
+
+def test_orden_insertada_usa_las_cantidades_aprobadas_no_el_stock_actual(
+    tmp_path, monkeypatch, ruta_compra
+):
+    """Pausa, cambia el stock en la base directamente (simulando que paso
+    tiempo entre la propuesta y la aprobacion), reanuda con aprobacion:
+    la fila insertada debe tener las cantidades que se aprobaron, no una
+    version recalculada contra el stock nuevo.
+    """
+    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
+
+    checkpointer = _checkpointer(tmp_path / "checkpoints.db")
+    grafo = construir_grafo(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": "hilo-frutas"}}
+
+    resultado_pausa = grafo.invoke(
+        _estado("arma la orden de compra de frutas"), config=config
+    )
+    cantidad_aprobada = resultado_pausa["__interrupt__"][0].value["items"][0]["cantidad"]
+    assert cantidad_aprobada == 28.0  # dato conocido del fixture ruta_compra
+
+    conexion = get_conn(ruta_compra)
+    conexion.execute("UPDATE insumos SET stock_actual = 50.0 WHERE nombre = 'fresa'")
+    conexion.commit()
+    conexion.close()
+
+    resultado = grafo.invoke(
+        Command(resume={"aprobada": True, "aprobada_por": "dueña"}), config=config
+    )
+
+    conexion = get_conn(ruta_compra)
+    (detalle_json,) = conexion.execute(
+        "SELECT detalle_json FROM ordenes_compra"
+    ).fetchone()
+    conexion.close()
+
+    items = json.loads(detalle_json)
+    assert items[0]["cantidad"] == cantidad_aprobada
+    assert "Aviso" in resultado["respuesta"]

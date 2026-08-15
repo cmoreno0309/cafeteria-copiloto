@@ -158,13 +158,28 @@ grafo arme la orden propuesta sin lógica intermedia.
    veces, una por periodo. Para "qué compro esta semana" llama `sugerir_compra`
    directo (esa herramienta ya orquesta `stock_actual` y `consumo_promedio`
    internamente); el grafo no repite esa lógica.
-3. **decidir** — ¿la respuesta es informativa o hay una acción propuesta?
+3. **decidir** — ¿la respuesta es informativa o hay una acción propuesta? Es un
+   edge condicional, no un nodo con estado propio: mira `intencion.accion`
+   (marcado por `entender`; `True` solo si la pregunta es un pedido imperativo
+   de ejecutar la compra, no una pregunta informativa, aunque ambas puedan usar
+   `sugerir_compra`).
    - informativa → va a `redactar`
    - acción → va a `proponer_accion`
-4. **proponer_accion** — arma la orden de compra propuesta y ejecuta `interrupt`
-   con el resumen. El grafo queda en pausa con su `thread_id`.
-5. **aplicar_accion** — al reanudar: si fue aprobada, llama `crear_orden_compra`;
-   si fue rechazada o corregida, registra el estado correspondiente.
+4. **proponer_accion** — arma la propuesta (`PropuestaCompra`: proveedor, items
+   con cantidad/unidad/costo estimado/urgencia, y el total — todo lo que un
+   canal necesita mostrar sin volver a consultar nada) a partir del resultado
+   de `sugerir_compra` ya obtenido, y ejecuta `interrupt` con ese payload. El
+   grafo queda en pausa con su `thread_id`. Si `sugerir_compra` trae más de un
+   proveedor pendiente y la pregunta no distingue cuál, o no queda ninguno para
+   el proveedor pedido, no ejecuta `interrupt`: responde pidiendo la aclaración
+   concreta, porque una orden es de un solo proveedor.
+5. **aplicar_accion** — al reanudar: si fue aprobada, llama `crear_orden_compra`
+   con los items que traía la `PropuestaCompra` aprobada, **nunca** un
+   recálculo de `sugerir_compra` en ese momento (el stock pudo cambiar entre la
+   pausa y la aprobación; la orden registrada es la que se aprobó). Después de
+   insertar, compara esa propuesta contra lo que `sugerir_compra` daría ahora
+   mismo — solo para avisar si hay diferencia, nunca para alterar el insert. Si
+   fue rechazada, registra el estado en la respuesta sin insertar nada.
 6. **redactar** — respuesta en lenguaje natural usando **solo** los números que
    devolvieron las herramientas.
 
@@ -175,7 +190,14 @@ por nombre: así una misma herramienta puede llamarse más de una vez (por
 ejemplo, `ventas_por_periodo` para dos periodos a comparar) y cada llamada
 queda trazable por separado, con los parámetros exactos que la produjeron.
 `resultado` es el modelo propio de la herramienta o un `ErrorHerramienta` si
-la llamada falló; una entrada que falla no afecta a las demás.
+la llamada falló; una entrada que falla no afecta a las demás. `resultado` se
+tipa como el Union explícito de esos modelos, no `Any`: el checkpointer
+serializa y deserializa el estado completo al reanudar un `interrupt`, y un
+campo `Any` no le da a Pydantic forma de reconstruir el subtipo correcto (se
+degrada a un dict plano). `accion_propuesta` es una `PropuestaCompra | None` y
+`aprobacion` una `DecisionAprobacion | None` (`aprobada: bool, aprobada_por:
+str | None, aprobada_en: datetime | None`) — la forma validada del valor de
+`resume` que manda el canal al reanudar.
 
 Persistencia: checkpointer de SQLite, para que la pausa sobreviva a un reinicio.
 
