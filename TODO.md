@@ -62,6 +62,12 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
       vs recurrentes
 - [ ] **2.4** Resumen proactivo programado cada mañana
 - [ ] **2.5** Usarlo una semana sin tocar código
+- [ ] **2.6** Conectar `dias` y `minimo_compras` de `clientes_inactivos`, y
+      `dias` de `consumo_promedio`, a `ParametrosPregunta` (hoy siempre usan
+      su default fijo porque el grafo no los extrae), para poder preguntar
+      por ventanas distintas a la de por defecto. Los `_kwargs_*` nuevos
+      deben seguir la regla 8 de `CLAUDE.md`: si la pregunta no menciona la
+      ventana, cae al default de la herramienta, no a `None`
 
 ## Fase 3 — Navegador (2-3 días)
 
