@@ -320,6 +320,94 @@ def ejecutar_herramientas(
     return {"resultados_herramientas": resultados}
 
 
+class SalidaRedactar(BaseModel):
+    respuesta: str
+
+
+def _resultados_para_prompt(resultados: list[ResultadoHerramienta]) -> str:
+    """Serializa cada llamada a una linea legible para el prompt: la
+    herramienta, los parametros exactos con los que se llamo, y su
+    resultado (o error) en JSON — para que el LLM pueda referenciar cada
+    numero a su origen exacto en vez de improvisar.
+    """
+    lineas = []
+    for entrada in resultados:
+        parametros_texto = ", ".join(
+            f"{clave}={valor}" for clave, valor in entrada.parametros.items()
+        )
+        if isinstance(entrada.resultado, ErrorHerramienta):
+            cuerpo = f"ERROR: {entrada.resultado.mensaje}"
+        else:
+            cuerpo = entrada.resultado.model_dump_json()
+        lineas.append(f"- {entrada.herramienta}({parametros_texto}): {cuerpo}")
+    return "\n".join(lineas)
+
+
+def _generar_respuesta(
+    pregunta: str, resultados: list[ResultadoHerramienta]
+) -> SalidaRedactar:
+    """Llama a Gemini para redactar la respuesta final.
+
+    Separada de redactar() para poder monkeypatchearla en pruebas sin llamar
+    a la API real.
+    """
+    cliente = ChatGoogleGenerativeAI(
+        model=get_gemini_model(), google_api_key=get_gemini_api_key()
+    )
+    modelo_estructurado = cliente.with_structured_output(SalidaRedactar)
+
+    prompt = (
+        "Sos el redactor de respuestas de un copiloto de operacion para una "
+        "cafeteria. Te paso la pregunta original de la dueña y los "
+        "resultados de las herramientas que se llamaron para responderla.\n\n"
+        "Reglas estrictas:\n"
+        "- Usa EXCLUSIVAMENTE los numeros que aparecen, literales, en los "
+        "resultados. No calcules, no estimes, no completes ni redondees "
+        "ningun numero que no este ahi tal cual. Esto incluye no deducir un "
+        "numero a partir de otros dos que si estan (ej. un porcentaje o una "
+        "diferencia entre dos cifras): si ese numero puntual no esta, decis "
+        "que no tenes ese dato, nunca lo calculas a partir de otro.\n"
+        "- Responde solo lo que la pregunta pide. Si un resultado trae mas "
+        "datos de los que se preguntaron (ej. el stock de los 12 insumos "
+        "cuando la pregunta era por los que estan bajo el minimo), elegi de "
+        "ahi unicamente los que corresponden a la pregunta — no listes el "
+        "resto.\n"
+        "- Si un resultado es un error, explicalo en una frase clara y en "
+        "lenguaje simple, sin jerga tecnica ni el mensaje crudo de la "
+        "herramienta.\n"
+        "- Si no hay resultados para responder (la pregunta era ambigua y "
+        "no se llamo ninguna herramienta, o lo que piden no esta entre los "
+        "resultados), no inventes una respuesta ni te disculpes en "
+        "generico: pedi la aclaracion concreta que hace falta.\n"
+        "- Respuesta breve por defecto: se lee en el celular. Si la "
+        "respuesta es una lista de items (ej. varios insumos a comprar), "
+        "una linea por item, sin parrafos de relleno.\n\n"
+        f"Pregunta: {pregunta}\n\n"
+        f"Resultados:\n{_resultados_para_prompt(resultados)}"
+    )
+    return modelo_estructurado.invoke(prompt)
+
+
+def redactar(estado: EstadoGrafo) -> dict:
+    """Redacta la respuesta final en lenguaje natural.
+
+    Si la intencion vino ambigua (o no se pudo clasificar), no hay
+    resultados que redactar: se responde directo con el motivo que explico
+    entender, sin llamar al LLM de nuevo. Es la misma explicacion en
+    lenguaje natural, y evita el costo y el riesgo de una segunda llamada
+    que podria inventar una respuesta donde no la hay.
+    """
+    intencion = estado["intencion"]
+    if intencion is None or intencion.ambigua:
+        motivo = intencion.motivo if intencion else None
+        return {
+            "respuesta": motivo or "No entendí la pregunta, ¿podrías reformularla?"
+        }
+
+    salida = _generar_respuesta(estado["pregunta"], estado["resultados_herramientas"])
+    return {"respuesta": salida.respuesta}
+
+
 def _checkpointer(db_path: Path | None = None) -> SqliteSaver:
     ruta = db_path if db_path is not None else CHECKPOINT_DB_PATH
     ruta.parent.mkdir(parents=True, exist_ok=True)
@@ -330,11 +418,13 @@ def _checkpointer(db_path: Path | None = None) -> SqliteSaver:
 
 
 def construir_grafo(checkpointer: SqliteSaver | None = None) -> StateGraph:
-    """Arma el grafo: entender -> ejecutar_herramientas. Sin redactar todavia."""
+    """Arma el grafo: entender -> ejecutar_herramientas -> redactar."""
     grafo = StateGraph(EstadoGrafo)
     grafo.add_node("entender", entender)
     grafo.add_node("ejecutar_herramientas", ejecutar_herramientas)
+    grafo.add_node("redactar", redactar)
     grafo.add_edge(START, "entender")
     grafo.add_edge("entender", "ejecutar_herramientas")
-    grafo.add_edge("ejecutar_herramientas", END)
+    grafo.add_edge("ejecutar_herramientas", "redactar")
+    grafo.add_edge("redactar", END)
     return grafo.compile(checkpointer=checkpointer or _checkpointer())

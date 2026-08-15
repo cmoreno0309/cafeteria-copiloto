@@ -1,5 +1,6 @@
 """Pruebas de core/graph.py: estado, nodo entender y checkpointer."""
 
+import re
 import sqlite3
 from datetime import date
 
@@ -12,14 +13,17 @@ from core.graph import (
     ParametrosPregunta,
     ResultadoHerramienta,
     SalidaEntender,
+    SalidaRedactar,
     _checkpointer,
     construir_grafo,
     ejecutar_herramientas,
     entender,
     normalizar_insumo,
+    redactar,
 )
 from core.models import (
     ConsumoInsumo,
+    ItemStock,
     ListaClientes,
     ListaMargenes,
     ListaStock,
@@ -66,6 +70,10 @@ def test_grafo_con_entender_stub_actualiza_estado_y_persiste_checkpoint(
     )
     monkeypatch.setattr(
         "core.graph._clasificar", lambda pregunta, hoy=None: salida_canned
+    )
+    monkeypatch.setattr(
+        "core.graph._generar_respuesta",
+        lambda pregunta, resultados: SalidaRedactar(respuesta="respuesta de prueba"),
     )
 
     checkpointer = _checkpointer(tmp_path / "checkpoints.db")
@@ -303,6 +311,36 @@ def test_ejecutar_herramientas_margen_sin_mes_no_devuelve_vacio_silencioso(conn_
     assert "mes" in entrada.resultado.mensaje
 
 
+def test_redactar_pregunta_ambigua_usa_el_motivo_sin_llamar_al_llm(monkeypatch):
+    def _fallar_si_se_llama(pregunta, resultados):
+        raise AssertionError(
+            "redactar no deberia llamar al LLM cuando la intencion es ambigua"
+        )
+
+    monkeypatch.setattr("core.graph._generar_respuesta", _fallar_si_se_llama)
+
+    estado = _estado_con(
+        Intencion(herramientas=[], ambigua=True, motivo="¿de que insumo hablas?")
+    )
+
+    resultado = redactar(estado)
+
+    assert resultado["respuesta"] == "¿de que insumo hablas?"
+
+
+def test_redactar_sin_intencion_no_llama_al_llm(monkeypatch):
+    def _fallar_si_se_llama(pregunta, resultados):
+        raise AssertionError("redactar no deberia llamar al LLM sin intencion")
+
+    monkeypatch.setattr("core.graph._generar_respuesta", _fallar_si_se_llama)
+
+    estado = _estado("pregunta de prueba")
+
+    resultado = redactar(estado)
+
+    assert resultado["respuesta"]
+
+
 def _estado(pregunta: str) -> dict:
     return {
         "pregunta": pregunta,
@@ -442,3 +480,71 @@ def test_margen_y_clientes_inactivos_via_grafo_en_una_pregunta():
     )
     assert isinstance(margenes.resultado, ListaMargenes)
     assert isinstance(clientes.resultado, ListaClientes)
+
+
+_PATRON_NUMERO = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def _numeros_en_texto(texto: str) -> list[float]:
+    """Todo numero que aparece en un texto libre, tolerando coma o punto
+    como separador decimal (la respuesta esta en español)."""
+    return [float(token.replace(",", ".")) for token in _PATRON_NUMERO.findall(texto)]
+
+
+def _numeros_en(obj) -> set[float]:
+    """Todo numero presente en una estructura anidada (dict/list/escalar),
+    mas el largo de cada lista: contar cuantos items hay no es inventar un
+    dato, es describir lo que ya vino, asi que tambien cuenta como valido.
+    """
+    numeros: set[float] = set()
+    if isinstance(obj, dict):
+        for valor in obj.values():
+            numeros |= _numeros_en(valor)
+    elif isinstance(obj, list):
+        numeros.add(float(len(obj)))
+        for item in obj:
+            numeros |= _numeros_en(item)
+    elif isinstance(obj, bool):
+        pass
+    elif isinstance(obj, (int, float)):
+        numeros.add(float(obj))
+    return numeros
+
+
+@pytest.mark.api
+def test_redactar_no_inventa_numeros_fuera_del_resultado():
+    resultado = ListaStock(
+        items=[
+            ItemStock(
+                nombre="cafe",
+                unidad="kg",
+                stock=12.5,
+                minimo=5.0,
+                bajo_minimo=False,
+                proveedor="Proveedor X",
+            ),
+            ItemStock(
+                nombre="leche",
+                unidad="litro",
+                stock=3.0,
+                minimo=4.0,
+                bajo_minimo=True,
+                proveedor="Proveedor Y",
+            ),
+        ]
+    )
+    estado = _estado("¿Cuánto stock de café y de leche tenemos?")
+    estado["intencion"] = Intencion(herramientas=["stock_actual"], ambigua=False)
+    estado["resultados_herramientas"] = [
+        ResultadoHerramienta(herramienta="stock_actual", parametros={}, resultado=resultado)
+    ]
+
+    salida = redactar(estado)
+    respuesta = salida["respuesta"]
+
+    numeros_validos = _numeros_en(resultado.model_dump())
+    for numero in _numeros_en_texto(respuesta):
+        assert numero in numeros_validos, (
+            f"la respuesta menciona {numero}, que no aparece en el resultado "
+            f"({numeros_validos}): {respuesta!r}"
+        )
