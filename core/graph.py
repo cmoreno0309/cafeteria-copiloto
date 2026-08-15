@@ -381,7 +381,12 @@ def _generar_respuesta(
         "generico: pedi la aclaracion concreta que hace falta.\n"
         "- Respuesta breve por defecto: se lee en el celular. Si la "
         "respuesta es una lista de items (ej. varios insumos a comprar), "
-        "una linea por item, sin parrafos de relleno.\n\n"
+        "una linea por item, sin parrafos de relleno.\n"
+        "- Si un resultado trae un campo de urgencia o prioridad (ej. "
+        "urgencia='urgente' vs 'esta_semana'), conserva esa distincion en "
+        "la respuesta: los items urgentes van separados de los que pueden "
+        "esperar, no todos bajo una misma etiqueta o mezclados en una sola "
+        "lista pareja.\n\n"
         f"Pregunta: {pregunta}\n\n"
         f"Resultados:\n{_resultados_para_prompt(resultados)}"
     )

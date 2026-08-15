@@ -441,6 +441,44 @@ def test_sugerir_compra_via_grafo_para_que_compro_esta_semana():
 
 
 @pytest.mark.api
+def test_redactar_via_grafo_distingue_urgencia_en_que_compro_esta_semana():
+    """Con la semilla actual, fresa sale urgente y el resto (espinaca,
+    palta) esta_semana (verificado a mano contra sugerir_compra). La
+    respuesta final debe conservar esa distincion, no mezclar todo bajo
+    una sola etiqueta.
+    """
+    estado = _entender_y_ejecutar("¿Qué debería comprar esta semana?")
+    estado.update(redactar(estado))
+    respuesta = estado["respuesta"].lower()
+
+    (entrada,) = _por_herramienta(estado["resultados_herramientas"], "sugerir_compra")
+    urgencias = {
+        item.insumo: item.urgencia
+        for proveedor in entrada.resultado.proveedores
+        for item in proveedor.items
+    }
+    # dato conocido contra la semilla actual, ver evals/valores_base.md
+    assert urgencias.get("fresa") == "urgente"
+    assert urgencias.get("espinaca") == "esta_semana"
+    assert urgencias.get("palta") == "esta_semana"
+
+    posiciones_urgente = [m.start() for m in re.finditer("urgen", respuesta)]
+    assert posiciones_urgente, f"la respuesta no distingue urgencia: {respuesta!r}"
+
+    def _distancia_a_urgente(insumo: str) -> int:
+        posicion = respuesta.find(insumo)
+        assert posicion >= 0, f"la respuesta no menciona {insumo}: {respuesta!r}"
+        return min(abs(posicion - p) for p in posiciones_urgente)
+
+    distancia_fresa = _distancia_a_urgente("fresa")
+    for insumo in ("espinaca", "palta"):
+        assert distancia_fresa < _distancia_a_urgente(insumo), (
+            f"fresa (urgente) deberia quedar mas cerca de 'urgente' que "
+            f"{insumo} (esta_semana): {respuesta!r}"
+        )
+
+
+@pytest.mark.api
 def test_comparar_ventas_via_grafo_de_dos_periodos():
     estado = _entender_y_ejecutar(
         "¿Cómo vendí en julio 2026 comparado con junio 2026?"
