@@ -1,6 +1,7 @@
 """Pruebas de core/graph.py: estado, nodo entender y checkpointer."""
 
 import json
+import logging
 import re
 import sqlite3
 from datetime import date, timedelta
@@ -954,3 +955,40 @@ def test_orden_insertada_usa_las_cantidades_aprobadas_no_el_stock_actual(
     items = json.loads(detalle_json)
     assert items[0]["cantidad"] == cantidad_aprobada
     assert "Aviso" in resultado["respuesta"]
+
+
+def test_checkpointer_no_emite_warnings_de_deserializacion_no_registrada(
+    tmp_path, monkeypatch, ruta_compra, caplog
+):
+    """Sin allowed_msgpack_modules, cada tipo Pydantic que EstadoGrafo guarda
+    directo en un campo (Intencion, ParametrosPregunta, ResultadoHerramienta,
+    PropuestaCompra, DecisionAprobacion) generaba un warning "unregistered
+    type" al releerse desde el checkpoint - incluso desde un proceso nuevo
+    apuntando al mismo archivo, como hacen los scripts de scripts/manual/.
+    """
+    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
+
+    ruta_checkpoints = tmp_path / "checkpoints.db"
+    config = {"configurable": {"thread_id": "hilo-frutas"}}
+
+    with caplog.at_level(logging.WARNING):
+        grafo = construir_grafo(checkpointer=_checkpointer(ruta_checkpoints))
+        grafo.invoke(_estado("arma la orden de compra de frutas"), config=config)
+        grafo.invoke(
+            Command(resume={"aprobada": True, "aprobada_por": "dueña"}), config=config
+        )
+
+        # simula un proceso nuevo (otro script) releyendo el mismo checkpoint
+        grafo_otro_proceso = construir_grafo(checkpointer=_checkpointer(ruta_checkpoints))
+        estado_final = grafo_otro_proceso.get_state(config)
+
+    assert estado_final.values["accion_propuesta"] is not None
+    assert estado_final.values["aprobacion"] is not None
+    mensajes_bloqueo = [
+        registro.getMessage()
+        for registro in caplog.records
+        if "unregistered type" in registro.getMessage()
+        or "Blocked deserialization" in registro.getMessage()
+    ]
+    assert mensajes_bloqueo == []

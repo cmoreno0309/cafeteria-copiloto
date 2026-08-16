@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, TypedDict
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -647,11 +648,34 @@ def redactar(estado: EstadoGrafo) -> dict:
     return {"respuesta": salida.respuesta}
 
 
+TIPOS_PYDANTIC_DEL_ESTADO = (
+    Intencion,
+    ParametrosPregunta,
+    ResultadoHerramienta,
+    PropuestaCompra,
+    DecisionAprobacion,
+)
+"""Todo tipo Pydantic propio que EstadoGrafo guarda directo en un campo
+(no envuelto en otro modelo). El checkpointer los serializa vía msgpack
+con una extension que registra modulo + nombre de clase: sin declararlos
+en allowed_msgpack_modules, cada lectura del checkpoint los deserializa
+en modo permisivo con un warning ("Deserializing unregistered type..."),
+y si se actualiza LangGraph con el modo estricto estos campos se
+reconstruirian como None en vez de fallar con un error visible. No hace
+falta listar los modelos anidados dentro de estos (ej. ItemPropuesto
+adentro de PropuestaCompra, o el Union de core/models dentro de
+ResultadoHerramienta.resultado): model_dump() ya los aplana a dict antes
+de serializar, asi que se reconstruyen junto con su contenedor via la
+validacion Pydantic normal, no via una extension msgpack propia.
+"""
+
+
 def _checkpointer(db_path: Path | None = None) -> SqliteSaver:
     ruta = db_path if db_path is not None else CHECKPOINT_DB_PATH
     ruta.parent.mkdir(parents=True, exist_ok=True)
     conexion = sqlite3.connect(ruta, check_same_thread=False)
-    checkpointer = SqliteSaver(conexion)
+    serde = JsonPlusSerializer(allowed_msgpack_modules=TIPOS_PYDANTIC_DEL_ESTADO)
+    checkpointer = SqliteSaver(conexion, serde=serde)
     checkpointer.setup()
     return checkpointer
 
