@@ -402,6 +402,25 @@ def _decidir_siguiente_nodo(estado: EstadoGrafo) -> Literal["proponer_accion", "
     return "redactar"
 
 
+def _decidir_despues_de_proponer(estado: EstadoGrafo) -> Literal["aplicar_accion", "fin"]:
+    """proponer_accion no siempre deja una accion_propuesta para aplicar.
+
+    Si _construir_propuesta no pudo resolver un unico proveedor sin
+    ambiguedad (0 o >1 candidatos, o sugerir_compra fallo), proponer_accion
+    devuelve {"respuesta": ...} y nunca llama interrupt(): la respuesta ya
+    esta lista, no hay nada que aprobar. Rutear igual a aplicar_accion en
+    ese caso lo hace leer una clave que ningun nodo escribio en este
+    thread: con el estado minimo real (un canal que invoca con solo
+    {"pregunta": ...}, sin precargar accion_propuesta=None como hace el
+    helper de pruebas _estado()), esa clave ni siquiera existe en el dict
+    y estado["accion_propuesta"] revienta con KeyError en vez de devolver
+    None.
+    """
+    if estado.get("accion_propuesta") is not None:
+        return "aplicar_accion"
+    return "fin"
+
+
 def _coincide_proveedor(pedido: str, candidato: str) -> bool:
     return _sin_tildes(pedido) in _sin_tildes(candidato)
 
@@ -641,7 +660,8 @@ def construir_grafo(checkpointer: SqliteSaver | None = None) -> StateGraph:
     """Arma el grafo:
 
     entender -> ejecutar_herramientas -> [decidir] -> redactar -> END
-                                                     -> proponer_accion -> aplicar_accion -> END
+                                                     -> proponer_accion -> [decidir] -> aplicar_accion -> END
+                                                                         -> END (propuesta ambigua, ya redacto la respuesta)
     """
     grafo = StateGraph(EstadoGrafo)
     grafo.add_node("entender", entender)
@@ -656,7 +676,11 @@ def construir_grafo(checkpointer: SqliteSaver | None = None) -> StateGraph:
         _decidir_siguiente_nodo,
         {"proponer_accion": "proponer_accion", "redactar": "redactar"},
     )
-    grafo.add_edge("proponer_accion", "aplicar_accion")
+    grafo.add_conditional_edges(
+        "proponer_accion",
+        _decidir_despues_de_proponer,
+        {"aplicar_accion": "aplicar_accion", "fin": END},
+    )
     grafo.add_edge("aplicar_accion", END)
     grafo.add_edge("redactar", END)
     return grafo.compile(checkpointer=checkpointer or _checkpointer())

@@ -888,6 +888,33 @@ def test_dos_threads_en_pausa_no_se_pisan(tmp_path, monkeypatch, ruta_compra_mul
     )
 
 
+def test_grafo_con_estado_minimo_y_propuesta_ambigua_no_crashea(
+    tmp_path, monkeypatch, ruta_compra_multi_proveedor
+):
+    """Reproduce el bug reportado a mano: un canal real invoca con solo
+    {"pregunta": ...} (no con _estado(), que precarga accion_propuesta=None)
+    sobre un thread nuevo. Si sugerir_compra trae varios proveedores y la
+    pregunta no distingue cual, proponer_accion nunca llega a interrupt():
+    devuelve {"respuesta": ...} y accion_propuesta nunca se setea. El grafo
+    no deberia seguir a aplicar_accion en ese caso.
+    """
+    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr(
+        "core.graph.get_conn", lambda: get_conn(ruta_compra_multi_proveedor)
+    )
+
+    checkpointer = _checkpointer(tmp_path / "checkpoints.db")
+    grafo = construir_grafo(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": "prueba-01"}}
+
+    resultado = grafo.invoke(
+        {"pregunta": "arma la orden de compra de frutas"}, config=config
+    )
+
+    assert "__interrupt__" not in resultado
+    assert "varios proveedores" in resultado["respuesta"].lower()
+
+
 def test_orden_insertada_usa_las_cantidades_aprobadas_no_el_stock_actual(
     tmp_path, monkeypatch, ruta_compra
 ):
