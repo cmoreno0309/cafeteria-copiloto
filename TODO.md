@@ -40,7 +40,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 ### Día 4: evaluación
 
 - [x] **1.15** `evals/dataset.yaml` con los 15 casos (incluidos los 2 ambiguos)
-- [ ] **1.16** `evals/run_evals.py` que escribe `resultados.md` con las dos
+- [x] **1.16** `evals/run_evals.py` que escribe `resultados.md` con las dos
       métricas separadas
 - [ ] **1.17** Primera corrida. Anotar el resultado tal cual, sin arreglar nada
 - [ ] **1.18** Arreglar los fallos de enrutamiento (no los de redacción) y
