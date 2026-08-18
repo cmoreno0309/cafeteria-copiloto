@@ -49,13 +49,18 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
       redacción del dataset (V3, no del agente — ver
       `evals/resultado_final_1.18.md` para las dos lecturas y el criterio
       de cuándo pedir aclaración)
-- [ ] **1.19** Langfuse en Docker: trazas con costo y latencia por consulta.
-      Instrumentación lista (`core/tracing.py`, `config` propagado por
-      `entender`/`redactar`, `evals/run_evals.py` etiqueta cada corrida con
-      un `session_id`, `evals/costo_langfuse.py` reporta costo/latencia
-      agregados). Falta: levantar el contenedor (ver `LANGFUSE.md`, lo
-      levanta el usuario), poner las claves en `.env`, y correr los 15
-      casos de verdad para tener el costo total y el promedio real
+- [x] **1.19** Langfuse en Docker: trazas con costo y latencia por consulta.
+      Contenedor local levantado por el usuario (`docker-compose.langfuse.yml`,
+      Postgres sin exponer al host), conexión verificada
+      (`auth_check() == True`). Corrida real de los 15 casos con trazas
+      activas: 15/15 ambas métricas, costo total $0.012725, promedio
+      $0.000848/consulta, latencia promedio 11.33s por consulta — detalle
+      completo en `evals/costo_1.19.md`. El deployment corre en "Langfuse
+      v4 events_only mode" y no expone el endpoint de listado de trazas, así
+      que el costo se calcula localmente (`_ColectorDeUso` en
+      `evals/run_evals.py`, tokens reales × precio oficial de
+      gemini-2.5-flash), no consultando la API de Langfuse
+      (`evals/costo_langfuse.py` queda para deployments que sí la tengan)
 
 ### Cierre de fase
 

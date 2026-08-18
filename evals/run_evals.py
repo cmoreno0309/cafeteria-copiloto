@@ -20,6 +20,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import time
 import unicodedata
 import uuid
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from datetime import date
 from pathlib import Path
 
 import yaml
+from langchain_core.callbacks import BaseCallbackHandler
 from langfuse import get_client
 
 import core.db as db
@@ -48,6 +50,48 @@ calculó — no es un error del grafo.
 UMBRAL_CASOS = 13
 PATRON_NUMERO = re.compile(r"-?\d+(?:\.\d+)?")
 
+PRECIO_ENTRADA_POR_TOKEN_USD = 0.30 / 1_000_000
+PRECIO_SALIDA_POR_TOKEN_USD = 2.50 / 1_000_000
+"""Precio de gemini-2.5-flash (ai.google.dev/gemini-api/docs/pricing,
+consultado 2026-08-18): $0.30/1M tokens de entrada (texto), $2.50/1M de
+salida (incluye thinking tokens, sin tarifa separada). El costo que
+reporta este script asume que GEMINI_MODEL sigue siendo el default del
+proyecto (gemini-2.5-flash); si se cambia el modelo, dejar de ser exacto.
+
+Se calcula localmente a partir de los tokens que devuelve cada respuesta
+de Gemini (ver _ColectorDeUso), no consultando la API de Langfuse: el
+deployment de Langfuse contra el que se probó esto corre en "v4
+events_only mode", que no expone el endpoint de listado de trazas
+(evals/costo_langfuse.py queda como alternativa para deployments que si
+lo tengan habilitado).
+"""
+
+
+class _ColectorDeUso(BaseCallbackHandler):
+    """Junta los tokens de entrada/salida de todas las llamadas al LLM
+    dentro de una corrida del grafo (entender + redactar cuentan juntas).
+    """
+
+    def __init__(self) -> None:
+        self.tokens_entrada = 0
+        self.tokens_salida = 0
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        for tanda in response.generations:
+            for generacion in tanda:
+                mensaje = getattr(generacion, "message", None)
+                uso = getattr(mensaje, "usage_metadata", None) if mensaje else None
+                if uso:
+                    self.tokens_entrada += uso.get("input_tokens", 0) or 0
+                    self.tokens_salida += uso.get("output_tokens", 0) or 0
+
+
+def _costo_usd(tokens_entrada: int, tokens_salida: int) -> float:
+    return (
+        tokens_entrada * PRECIO_ENTRADA_POR_TOKEN_USD
+        + tokens_salida * PRECIO_SALIDA_POR_TOKEN_USD
+    )
+
 
 @dataclass
 class ResultadoCaso:
@@ -61,6 +105,10 @@ class ResultadoCaso:
     acierto_valor: bool
     respuesta: str
     detalle: str = ""
+    tokens_entrada: int = 0
+    tokens_salida: int = 0
+    costo_usd: float = 0.0
+    latencia_segundos: float = 0.0
 
 
 def _sin_tildes(texto: str) -> str:
@@ -243,16 +291,20 @@ def _correr_caso(
     session_id: str,
 ) -> ResultadoCaso:
     thread_id = f"eval-{fecha_referencia.isoformat()}-{caso['id']}"
+    colector = _ColectorDeUso()
     config = {
         "configurable": {"thread_id": thread_id},
-        "callbacks": callbacks_langfuse(),
+        "callbacks": [*callbacks_langfuse(), colector],
         "metadata": {"langfuse_session_id": session_id, "langfuse_tags": ["evals"]},
     }
     estado_inicial: EstadoGrafo = {"pregunta": caso["pregunta"], "hoy": fecha_referencia}
 
     ordenes_antes = _contar_ordenes(ruta_db_temporal)
+    inicio = time.perf_counter()
     salida = grafo.invoke(estado_inicial, config=config)
+    latencia_segundos = time.perf_counter() - inicio
     ordenes_despues = _contar_ordenes(ruta_db_temporal)
+    costo_usd = _costo_usd(colector.tokens_entrada, colector.tokens_salida)
 
     esperadas = sorted(set(caso.get("herramientas_esperadas", [])))
 
@@ -275,6 +327,10 @@ def _correr_caso(
                 "el grafo quedo pausado esperando aprobacion (interrupt) en "
                 "vez de responder"
             ),
+            tokens_entrada=colector.tokens_entrada,
+            tokens_salida=colector.tokens_salida,
+            costo_usd=costo_usd,
+            latencia_segundos=latencia_segundos,
         )
 
     llamadas = _llamadas_normalizadas(salida)
@@ -296,6 +352,10 @@ def _correr_caso(
         acierto_valor=acierto_valor,
         respuesta=respuesta,
         detalle=detalle,
+        tokens_entrada=colector.tokens_entrada,
+        tokens_salida=colector.tokens_salida,
+        costo_usd=costo_usd,
+        latencia_segundos=latencia_segundos,
     )
 
 
@@ -307,6 +367,8 @@ def _escribir_resultados(resultados: list[ResultadoCaso], fecha_referencia: date
     total = len(resultados)
     aciertos_herramienta = sum(r.acierto_herramienta for r in resultados)
     aciertos_valor = sum(r.acierto_valor for r in resultados)
+    costo_total = sum(r.costo_usd for r in resultados)
+    latencia_promedio = sum(r.latencia_segundos for r in resultados) / total if total else 0.0
 
     lineas = [
         "# Resultados de evaluación",
@@ -320,19 +382,25 @@ def _escribir_resultados(resultados: list[ResultadoCaso], fecha_referencia: date
         f"(umbral de cierre: {UMBRAL_CASOS}/{total})",
         f"- Acierto de valor: **{aciertos_valor}/{total}** "
         f"(umbral de cierre: {UMBRAL_CASOS}/{total})",
+        f"- Costo total: **${costo_total:.6f}** — promedio por consulta: "
+        f"${(costo_total / total if total else 0.0):.6f}",
+        f"- Latencia promedio por consulta: **{latencia_promedio:.2f}s**",
         "",
-        "| id | caso | categoría | pregunta | herramienta | valor | detalle |",
-        "|---|---|---|---|---|---|---|",
+        "| id | caso | categoría | pregunta | herramienta | valor | tokens in/out | costo | latencia | detalle |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in resultados:
         lineas.append(
-            "| {id} | {caso} | {categoria} | {pregunta} | {th} | {tv} | {detalle} |".format(
+            "| {id} | {caso} | {categoria} | {pregunta} | {th} | {tv} | {tokens} | {costo} | {latencia} | {detalle} |".format(
                 id=r.id,
                 caso=r.caso,
                 categoria=r.categoria,
                 pregunta=_escapar_celda(r.pregunta),
                 th="OK" if r.acierto_herramienta else "FALLA",
                 tv="OK" if r.acierto_valor else "FALLA",
+                tokens=f"{r.tokens_entrada}/{r.tokens_salida}",
+                costo=f"${r.costo_usd:.6f}",
+                latencia=f"{r.latencia_segundos:.2f}s",
                 detalle=_escapar_celda(r.detalle),
             )
         )
@@ -358,8 +426,13 @@ def _imprimir_resumen(resultados: list[ResultadoCaso]) -> None:
     total = len(resultados)
     aciertos_herramienta = sum(r.acierto_herramienta for r in resultados)
     aciertos_valor = sum(r.acierto_valor for r in resultados)
+    costo_total = sum(r.costo_usd for r in resultados)
+    latencia_promedio = sum(r.latencia_segundos for r in resultados) / total if total else 0.0
     print(f"Acierto de herramienta: {aciertos_herramienta}/{total}")
     print(f"Acierto de valor: {aciertos_valor}/{total}")
+    print(f"Costo total: ${costo_total:.6f}")
+    print(f"Costo promedio por consulta: ${(costo_total / total if total else 0.0):.6f}")
+    print(f"Latencia promedio por consulta: {latencia_promedio:.2f}s")
     for r in resultados:
         if not (r.acierto_herramienta and r.acierto_valor):
             print(f"  {r.id} ({r.caso}): {r.detalle or 'ver herramientas esperadas/llamadas'}")

@@ -53,17 +53,20 @@ def get_langfuse_secret_key() -> str | None:
 
 
 def get_langfuse_host() -> str:
-    """Devuelve LANGFUSE_HOST o el contenedor local por defecto si falta.
+    """Devuelve LANGFUSE_BASE_URL, LANGFUSE_HOST (en ese orden, el mismo
+    que usa el SDK de Langfuse) o el contenedor local por defecto si
+    ninguna esta definida.
 
     El default del SDK de Langfuse es Langfuse Cloud, no un contenedor
-    local: si esta variable faltara y no se pisara el default del SDK, las
-    trazas se mandarian por accidente a un servidor que no es el que este
-    proyecto levanta con Docker.
+    local: si ninguna de las dos variables estuviera definida y no se
+    pisara el default del SDK, las trazas se mandarian por accidente a un
+    servidor que no es el que este proyecto levanta con Docker.
     """
-    host = os.getenv("LANGFUSE_HOST")
+    host = os.getenv("LANGFUSE_BASE_URL") or os.getenv("LANGFUSE_HOST")
     if not host:
         logger.info(
-            "LANGFUSE_HOST no esta definida, usando el contenedor local por defecto: %s",
+            "LANGFUSE_BASE_URL/LANGFUSE_HOST no estan definidas, usando el "
+            "contenedor local por defecto: %s",
             LANGFUSE_HOST_POR_DEFECTO,
         )
         return LANGFUSE_HOST_POR_DEFECTO

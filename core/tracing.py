@@ -21,13 +21,17 @@ def callbacks_langfuse() -> list:
     """Callbacks para pasarle a grafo.invoke(..., config={"callbacks": ...}).
 
     Vacia si faltan las claves. El SDK de Langfuse lee LANGFUSE_PUBLIC_KEY/
-    LANGFUSE_SECRET_KEY/LANGFUSE_HOST directo de las variables de entorno
-    (python-dotenv ya las cargo en os.environ al importar core.config), asi
-    que alcanza con fijar LANGFUSE_HOST al contenedor local si no vino
-    seteada — el default del SDK es Langfuse Cloud, no este contenedor — e
-    instanciar el CallbackHandler.
+    LANGFUSE_SECRET_KEY/LANGFUSE_BASE_URL/LANGFUSE_HOST directo de las
+    variables de entorno (python-dotenv ya las cargo en os.environ al
+    importar core.config), asi que alcanza con fijar ambos nombres de host
+    al contenedor local si no vinieron seteados — el default del SDK es
+    Langfuse Cloud, no este contenedor — e instanciar el CallbackHandler.
+    Fijar los dos nombres (no solo el que el SDK prioriza) evita depender
+    de cual de los dos termine leyendo una version futura del SDK.
     """
     if not trazas_habilitadas():
         return []
-    os.environ["LANGFUSE_HOST"] = get_langfuse_host()
+    host = get_langfuse_host()
+    os.environ["LANGFUSE_BASE_URL"] = host
+    os.environ["LANGFUSE_HOST"] = host
     return [CallbackHandler()]

@@ -49,18 +49,22 @@ def test_callbacks_langfuse_devuelve_un_callback_handler_con_claves(monkeypatch)
 def test_callbacks_langfuse_fija_el_host_local_por_defecto(monkeypatch):
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-prueba-host")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-prueba-host")
+    monkeypatch.delenv("LANGFUSE_BASE_URL", raising=False)
     monkeypatch.delenv("LANGFUSE_HOST", raising=False)
 
     callbacks_langfuse()
 
     assert os.environ["LANGFUSE_HOST"] == "http://localhost:3000"
+    assert os.environ["LANGFUSE_BASE_URL"] == "http://localhost:3000"
 
 
 def test_callbacks_langfuse_respeta_un_host_ya_definido(monkeypatch):
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-prueba-host-custom")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-prueba-host-custom")
+    monkeypatch.delenv("LANGFUSE_BASE_URL", raising=False)
     monkeypatch.setenv("LANGFUSE_HOST", "http://otro-host:3000")
 
     callbacks_langfuse()
 
     assert os.environ["LANGFUSE_HOST"] == "http://otro-host:3000"
+    assert os.environ["LANGFUSE_BASE_URL"] == "http://otro-host:3000"
