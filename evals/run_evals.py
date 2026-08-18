@@ -306,6 +306,21 @@ def _escribir_resultados(resultados: list[ResultadoCaso], fecha_referencia: date
                 detalle=_escapar_celda(r.detalle),
             )
         )
+
+    fallos = [r for r in resultados if not (r.acierto_herramienta and r.acierto_valor)]
+    if fallos:
+        lineas += ["", "## Detalle de los casos que fallaron", ""]
+        for r in fallos:
+            lineas.append(f"### {r.id} ({r.caso}) — {r.pregunta}")
+            lineas.append("")
+            lineas.append(
+                f"- herramienta: {'OK' if r.acierto_herramienta else 'FALLA'} "
+                f"— esperada `{r.herramientas_esperadas}`, llamada `{r.herramientas_llamadas}`"
+            )
+            lineas.append(f"- valor: {'OK' if r.acierto_valor else 'FALLA'} — {r.detalle}")
+            lineas.append(f"- respuesta del agente: {r.respuesta or '(vacía)'}")
+            lineas.append("")
+
     RUTA_RESULTADOS.write_text("\n".join(lineas) + "\n", encoding="utf-8")
 
 
@@ -318,6 +333,7 @@ def _imprimir_resumen(resultados: list[ResultadoCaso]) -> None:
     for r in resultados:
         if not (r.acierto_herramienta and r.acierto_valor):
             print(f"  {r.id} ({r.caso}): {r.detalle or 'ver herramientas esperadas/llamadas'}")
+            print(f"    respuesta: {r.respuesta or '(vacía)'}")
     print(f"Detalle completo en {RUTA_RESULTADOS}")
 
 

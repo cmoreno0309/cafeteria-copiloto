@@ -42,7 +42,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 - [x] **1.15** `evals/dataset.yaml` con los 15 casos (incluidos los 2 ambiguos)
 - [x] **1.16** `evals/run_evals.py` que escribe `resultados.md` con las dos
       métricas separadas
-- [ ] **1.17** Primera corrida. Anotar el resultado tal cual, sin arreglar nada
+- [x] **1.17** Primera corrida. Anotar el resultado tal cual, sin arreglar nada
 - [ ] **1.18** Arreglar los fallos de enrutamiento (no los de redacción) y
       volver a correr. Guardar antes/después
 - [ ] **1.19** Langfuse en Docker: trazas con costo y latencia por consulta
