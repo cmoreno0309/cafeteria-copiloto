@@ -175,6 +175,23 @@ def _evaluar_valor(
         objetivo = float(caso["valor_esperado"])
         if any(n == objetivo for n in numeros):
             return True, ""
+        items_esperados = caso.get("items_esperados")
+        if items_esperados:
+            # No siempre se escribe el total como digito (ej. una lista de
+            # clientes sin decir "5 clientes"): si el caso trae la lista de
+            # nombres que la respuesta deberia mencionar, alcanza con que
+            # esten todos, aunque el numero nunca aparezca literal.
+            texto_normalizado = _sin_tildes(respuesta)
+            mencionados = [
+                item for item in items_esperados if _sin_tildes(item) in texto_normalizado
+            ]
+            if len(mencionados) == len(items_esperados):
+                return True, ""
+            faltantes = [item for item in items_esperados if item not in mencionados]
+            return False, (
+                f"menciona {len(mencionados)}/{len(items_esperados)} items "
+                f"esperados; faltan: {', '.join(faltantes)}"
+            )
         return False, f"no aparece {caso['valor_esperado']} en la respuesta"
 
     if tipo == "monto":

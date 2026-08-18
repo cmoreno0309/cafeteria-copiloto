@@ -17,7 +17,12 @@
 # resultado sea reproducible — no se recalculan estos 5 casos en cada corrida.
 #
 # tipo:
-#   conteo       -> valor_esperado es un entero exacto.
+#   conteo       -> valor_esperado es un entero exacto. Si el caso trae
+#                    items_esperados (lista de nombres), el acierto también
+#                    vale si la respuesta menciona esos items (aunque no
+#                    escriba el número como dígito): lo que importa es que
+#                    la cuenta sea correcta, no que diga "N" literal (ver
+#                    caso C1 en evals/baseline_1.17.md, tarea 1.18 paso 1).
 #   monto        -> valor_esperado es un monto en $ o en la unidad indicada
 #                    en la pregunta; usar tolerancia.
 #   texto_monto  -> la respuesta debe nombrar valor_esperado_texto (el
@@ -37,6 +42,7 @@
   herramientas_esperadas: [stock_actual]
   tipo: conteo
   valor_esperado: 3
+  items_esperados: [espinaca, fresa, palta]
 
 - id: "02"
   caso: S2
@@ -64,6 +70,7 @@
   herramientas_esperadas: [sugerir_compra]
   tipo: conteo
   valor_esperado: 4
+  items_esperados: [fresa, espinaca, palta, "pan integral"]
   fecha_referencia: 2026-08-16
 
 - id: "05"
@@ -141,6 +148,12 @@
   herramientas_esperadas: [clientes_inactivos]
   tipo: conteo
   valor_esperado: 5
+  items_esperados:
+    - "Fernando Rojas"
+    - "Antonella Paredes"
+    - "Valentina Ramirez"
+    - "Sebastian Rios"
+    - "Valeria Campos"
   fecha_referencia: 2026-08-16
 
 - id: "13"
