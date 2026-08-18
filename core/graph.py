@@ -58,7 +58,10 @@ HERRAMIENTAS_DISPONIBLES = """
   desde_comparacion/hasta_comparacion con el segundo.
 - margen_por_producto(mes): margen de cada producto en un mes (YYYY-MM).
 - clientes_inactivos(): clientes frecuentes que dejaron de comprar, con
-  umbrales fijos (no configurables desde la pregunta).
+  umbrales fijos (no configurables desde la pregunta). Por cada cliente
+  devuelve tambien compras_totales y ticket_promedio: sirve para preguntas
+  sobre un cliente puntual de esa lista (ej. "¿cuantas compras habia hecho
+  [cliente] antes de dejar de venir?"), no solo para contar cuantos hay.
 - sugerir_compra(): que insumos comprar esta semana, con cantidad y urgencia.
   Ya orquesta stock y consumo internamente: para "que compro esta semana"
   no hace falta pedir stock_actual ni consumo_promedio por separado.
