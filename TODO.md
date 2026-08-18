@@ -43,8 +43,12 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 - [x] **1.16** `evals/run_evals.py` que escribe `resultados.md` con las dos
       métricas separadas
 - [x] **1.17** Primera corrida. Anotar el resultado tal cual, sin arreglar nada
-- [ ] **1.18** Arreglar los fallos de enrutamiento (no los de redacción) y
-      volver a correr. Guardar antes/después
+- [x] **1.18** Arreglar los fallos de enrutamiento (no los de redacción) y
+      volver a correr. Guardar antes/después. Resultado: 13/15 → 15/15
+      herramienta, 12/15 → 15/15 valor, en 3 arreglos + 1 corrección de
+      redacción del dataset (V3, no del agente — ver
+      `evals/resultado_final_1.18.md` para las dos lecturas y el criterio
+      de cuándo pedir aclaración)
 - [ ] **1.19** Langfuse en Docker: trazas con costo y latencia por consulta
 
 ### Cierre de fase
@@ -52,7 +56,10 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 - [ ] **1.20** `channels/mcp_server.py` exponiendo las 5 herramientas de lectura
 - [ ] **1.21** Conectarlo a Claude Desktop y usarlo un día
 - [ ] **1.22** README: diagrama del grafo, tabla de evaluación antes/después,
-      captura de una traza con el costo
+      captura de una traza con el costo. La tabla antes/después debe
+      mostrar las dos lecturas de V3 (dataset original 14/15 valor vs.
+      V3 corregido 15/15 valor), no solo el resultado final — ver
+      `evals/resultado_final_1.18.md`
 
 ## Fase 2 — Telegram (2 días)
 

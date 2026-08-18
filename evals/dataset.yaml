@@ -95,12 +95,25 @@
 - id: "07"
   caso: V3
   categoria: ventas
-  pregunta: "¿Qué categoría de productos vendió más en julio 2026?"
+  pregunta: "¿Qué categoría generó más ingresos en julio 2026?"
   herramientas_esperadas: [ventas_por_periodo]
   tipo: texto_monto
   valor_esperado_texto: "batido"
   valor_esperado: 1955.00
   tolerancia: 0.01
+  pregunta_original: "¿Qué categoría de productos vendió más en julio 2026?"
+  notas: >
+    Corregido en tarea 1.18 (paso 4): la redacción original ("vendió más")
+    es ambigua entre ingresos y unidades — igual que V4 antes de pedir
+    "ingresos" explícito (ver su nota). En las 3 corridas de 1.17/1.18 el
+    agente respondió de forma consistente con la categoría de más unidades
+    (café, 140), una lectura tan válida como la de ingresos. No es un fallo
+    del agente ni se le pidió aclaración (a diferencia de A1/A2): acá
+    cualquier interpretación razonable sigue siendo útil, así que se
+    corrigió la pregunta del dataset para que apunte a un único criterio,
+    igual que V4. Ver evals/resultado_final_1.18.md para el resultado con
+    ambas redacciones (original y corregida) y el criterio completo de
+    cuándo pedir aclaración y cuándo no.
 
 - id: "08"
   caso: V4
