@@ -73,6 +73,17 @@ REGLA_ACCION = (
     "intencion, no la herramienta. Por defecto accion=False."
 )
 
+REGLA_PERIODO = (
+    "ventas_por_periodo necesita un periodo explicito (desde/hasta): si la "
+    "pregunta no menciona un rango, mes o comparacion de fechas ('¿como van "
+    "las ventas?', '¿como estamos vendiendo?'), NO inventes un periodo por "
+    "tu cuenta (ni 'los ultimos dias', ni el mes en curso, ni ningun otro "
+    "default): marca ambigua=True y en motivo pedi que se especifique el "
+    "periodo. Devolver un numero de un rango que la pregunta no pidio es un "
+    "error peor que preguntar de mas — la dueña no puede confiar en una "
+    "respuesta que contesta algo distinto de lo que preguntó."
+)
+
 
 class ParametrosPregunta(BaseModel):
     insumo: str | None = None
@@ -220,6 +231,7 @@ def _clasificar(pregunta: str, hoy: date | None = None) -> SalidaEntender:
         "('esta semana', 'el mes pasado') a fechas o meses absolutos.\n\n"
         f"Herramientas disponibles:{HERRAMIENTAS_DISPONIBLES}\n"
         f"{REGLA_ACCION}\n\n"
+        f"{REGLA_PERIODO}\n\n"
         "Si la pregunta es ambigua o ninguna herramienta la responde, marca "
         "ambigua=True y explica por que en motivo, en vez de adivinar.\n\n"
         f"Pregunta: {pregunta}"
