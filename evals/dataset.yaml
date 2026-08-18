@@ -1,0 +1,182 @@
+# Dataset de evaluación (tarea 1.15, SPEC §5).
+#
+# 15 casos: 4 de stock y compras, 4 de ventas, 3 de márgenes, 2 de clientes,
+# 2 ambiguos. Historial de cómo se armó cada valor esperado, incluida la
+# consulta SQL exacta, en evals/propuesta_dataset_1.15.md — no se repite acá.
+#
+# Base usada para calcular todos los valores: data/cafeteria.db tal como la
+# deja scripts/seed.py (60 días de ventas, 2026-06-13 a 2026-08-11; 12
+# insumos, 10 productos, 25 clientes). Si se reseeda la base con datos
+# distintos, este dataset queda desactualizado y hay que recalcular a mano.
+#
+# fecha_referencia: 5 casos (marcados abajo) usan herramientas que anclan su
+# ventana a "hoy" (consumo_promedio, clientes_inactivos, sugerir_compra) en
+# vez de a un rango explícito de la pregunta. Su valor_esperado se calculó
+# con hoy=2026-08-16. evals/run_evals.py debe invocar el grafo con ese mismo
+# "hoy" (parámetro --fecha-referencia, default 2026-08-16) para que el
+# resultado sea reproducible — no se recalculan estos 5 casos en cada corrida.
+#
+# tipo:
+#   conteo       -> valor_esperado es un entero exacto.
+#   monto        -> valor_esperado es un monto en $ o en la unidad indicada
+#                    en la pregunta; usar tolerancia.
+#   texto_monto  -> la respuesta debe nombrar valor_esperado_texto (el
+#                    ganador) y el monto asociado en valor_esperado.
+#   monto_par    -> compara dos periodos: valor_esperado (primer periodo) y
+#                    valor_esperado_comparacion (segundo periodo).
+#   ambigua      -> no hay valor_esperado: lo correcto es que el grafo pida
+#                    una aclaración concreta en vez de adivinar un número.
+#
+# accion_esperada: true solo en A2, donde la pregunta es un pedido imperativo
+# de ejecutar una compra (intencion.accion=True), no una consulta informativa.
+
+- id: "01"
+  caso: S1
+  categoria: stock
+  pregunta: "¿Qué insumos están por debajo del mínimo?"
+  herramientas_esperadas: [stock_actual]
+  tipo: conteo
+  valor_esperado: 3
+
+- id: "02"
+  caso: S2
+  categoria: stock
+  pregunta: "¿Cuánta proteína en polvo vainilla me queda en stock?"
+  herramientas_esperadas: [stock_actual]
+  tipo: monto
+  valor_esperado: 2.5
+  tolerancia: 0.01
+
+- id: "03"
+  caso: S3
+  categoria: stock
+  pregunta: "¿Cuál es el consumo promedio diario de café en grano?"
+  herramientas_esperadas: [consumo_promedio]
+  tipo: monto
+  valor_esperado: 0.1035
+  tolerancia: 0.001
+  fecha_referencia: 2026-08-16
+
+- id: "04"
+  caso: S4
+  categoria: stock
+  pregunta: "¿Qué debería comprar esta semana?"
+  herramientas_esperadas: [sugerir_compra]
+  tipo: conteo
+  valor_esperado: 4
+  fecha_referencia: 2026-08-16
+
+- id: "05"
+  caso: V1
+  categoria: ventas
+  pregunta: "¿Cómo fueron las ventas de julio 2026?"
+  herramientas_esperadas: [ventas_por_periodo]
+  tipo: monto
+  valor_esperado: 5481.00
+  tolerancia: 0.01
+
+- id: "06"
+  caso: V2
+  categoria: ventas
+  pregunta: "¿Cómo vendí en julio 2026 comparado con junio 2026?"
+  herramientas_esperadas: [ventas_por_periodo]
+  tipo: monto_par
+  valor_esperado: 5481.00
+  valor_esperado_comparacion: 3096.00
+  tolerancia: 0.01
+
+- id: "07"
+  caso: V3
+  categoria: ventas
+  pregunta: "¿Qué categoría de productos vendió más en julio 2026?"
+  herramientas_esperadas: [ventas_por_periodo]
+  tipo: texto_monto
+  valor_esperado_texto: "batido"
+  valor_esperado: 1955.00
+  tolerancia: 0.01
+
+- id: "08"
+  caso: V4
+  categoria: ventas
+  pregunta: "¿Qué producto generó más ingresos en julio 2026?"
+  herramientas_esperadas: [ventas_por_periodo]
+  tipo: texto_monto
+  valor_esperado_texto: "Batido verde detox"
+  valor_esperado: 795.00
+  tolerancia: 0.01
+
+- id: "09"
+  caso: M1
+  categoria: margenes
+  pregunta: "¿Qué producto dejó más margen total en julio 2026?"
+  herramientas_esperadas: [margen_por_producto]
+  tipo: texto_monto
+  valor_esperado_texto: "Batido verde detox"
+  valor_esperado: 603.67
+  tolerancia: 0.01
+
+- id: "10"
+  caso: M2
+  categoria: margenes
+  pregunta: "¿Qué producto tiene mejor margen porcentual en julio 2026?"
+  herramientas_esperadas: [margen_por_producto]
+  tipo: texto_monto
+  valor_esperado_texto: "Café americano"
+  valor_esperado: 87.66
+  tolerancia: 0.01
+
+- id: "11"
+  caso: M3
+  categoria: margenes
+  pregunta: "¿Cuál es el margen unitario del capuchino en julio 2026?"
+  herramientas_esperadas: [margen_por_producto]
+  tipo: monto
+  valor_esperado: 7.036
+  tolerancia: 0.01
+
+- id: "12"
+  caso: C1
+  categoria: clientes
+  pregunta: "¿Qué clientes frecuentes dejaron de venir?"
+  herramientas_esperadas: [clientes_inactivos]
+  tipo: conteo
+  valor_esperado: 5
+  fecha_referencia: 2026-08-16
+
+- id: "13"
+  caso: C2
+  categoria: clientes
+  pregunta: "¿Cuántas compras había hecho Fernando Rojas antes de dejar de venir?"
+  herramientas_esperadas: [clientes_inactivos]
+  tipo: conteo
+  valor_esperado: 16
+  fecha_referencia: 2026-08-16
+
+- id: "14"
+  caso: A1
+  categoria: ambiguo
+  pregunta: "¿Cómo van las ventas?"
+  herramientas_esperadas: []
+  herramientas_alternativas:
+    - [ventas_por_periodo]  # aceptable si Gemini no marca ambigua=True pero
+                             # ventas_por_periodo falla por falta de periodo
+  tipo: ambigua
+  notas: >
+    Falta el período. Lo correcto es que la respuesta final pida el rango de
+    fechas, no que dé un total. herramientas_esperadas vacío es la forma
+    principal; herramientas_alternativas cubre la otra forma válida descrita
+    en la propuesta (ver evals/propuesta_dataset_1.15.md).
+
+- id: "15"
+  caso: A2
+  categoria: ambiguo
+  pregunta: "Arma la orden de compra"
+  herramientas_esperadas: [sugerir_compra]
+  accion_esperada: true
+  tipo: ambigua
+  fecha_referencia: 2026-08-16
+  notas: >
+    Falta el proveedor. Con hoy=2026-08-16 hay 2 proveedores con algo
+    pendiente a la vez (Mercado de Frutas y Panadería La Espiga), así que
+    proponer_accion no puede resolver uno solo sin adivinar: debe pedir
+    aclaración y no insertar nada en ordenes_compra.

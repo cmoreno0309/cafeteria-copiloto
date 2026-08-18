@@ -163,6 +163,7 @@ class DecisionAprobacion(BaseModel):
 
 class EstadoGrafo(TypedDict):
     pregunta: str
+    hoy: date | None
     intencion: Intencion | None
     parametros: ParametrosPregunta | None
     resultados_herramientas: list[ResultadoHerramienta]
@@ -228,7 +229,7 @@ def _clasificar(pregunta: str, hoy: date | None = None) -> SalidaEntender:
 
 def entender(estado: EstadoGrafo) -> dict:
     """Clasifica la intencion de la pregunta y extrae sus parametros."""
-    salida = _clasificar(estado["pregunta"])
+    salida = _clasificar(estado["pregunta"], hoy=estado.get("hoy"))
 
     parametros = salida.parametros
     if parametros.insumo:
@@ -305,6 +306,13 @@ HERRAMIENTAS: dict[NombreHerramienta, tuple[Callable, Callable]] = {
     "sugerir_compra": (sugerir_compra, _sin_parametros),
 }
 
+HERRAMIENTAS_CON_ANCLA_HOY = {"consumo_promedio", "clientes_inactivos", "sugerir_compra"}
+"""Herramientas cuya ventana de fechas ancla a `hoy` en vez de recibir un
+rango explicito de la pregunta (ver sus docstrings en core/tools/). Son las
+unicas a las que `_llamar` les pasa `estado["hoy"]`: pasarselo a las demas
+seria un TypeError, no aceptan ese parametro.
+"""
+
 
 def _llamar(
     nombre_herramienta: NombreHerramienta,
@@ -312,6 +320,7 @@ def _llamar(
     construir_kwargs: Callable[[ParametrosPregunta], dict],
     parametros: ParametrosPregunta,
     conexion: sqlite3.Connection,
+    hoy: date | None = None,
 ) -> ResultadoHerramienta:
     """Arma los kwargs y ejecuta la herramienta, empaquetando el resultado
     (o su error) junto con los parametros exactos que se usaron, para que
@@ -323,11 +332,21 @@ def _llamar(
     ErrorHerramienta para que redactar lo explique. `construir_kwargs` es
     quien decide, por herramienta, que campos tienen un default razonable
     y cuales deben fallar en vez de dejar pasar None.
+
+    `hoy`, si viene, ancla la fecha "de hoy" para consumo_promedio,
+    clientes_inactivos y sugerir_compra en vez de que cada una use
+    date.today() real — asi evals/run_evals.py puede correr el dataset
+    contra una fecha de referencia fija y reproducible. Con hoy=None (el
+    caso normal, fuera de evals) el comportamiento es identico al de
+    antes: cada herramienta cae a date.today().
     """
     kwargs: dict = {}
     try:
         kwargs = construir_kwargs(parametros)
-        resultado: Any = funcion(**kwargs, conn=conexion)
+        kwargs_llamada = dict(kwargs)
+        if hoy is not None and nombre_herramienta in HERRAMIENTAS_CON_ANCLA_HOY:
+            kwargs_llamada["hoy"] = hoy
+        resultado: Any = funcion(**kwargs_llamada, conn=conexion)
     except ValueError as error:
         resultado = ErrorHerramienta(mensaje=str(error))
     return ResultadoHerramienta(
@@ -355,13 +374,16 @@ def ejecutar_herramientas(
         return {"resultados_herramientas": []}
 
     parametros = estado["parametros"] or ParametrosPregunta()
+    hoy = estado.get("hoy")
     conexion = conn if conn is not None else get_conn()
     try:
         resultados: list[ResultadoHerramienta] = []
         for nombre_herramienta in intencion.herramientas:
             funcion, construir_kwargs = HERRAMIENTAS[nombre_herramienta]
             resultados.append(
-                _llamar(nombre_herramienta, funcion, construir_kwargs, parametros, conexion)
+                _llamar(
+                    nombre_herramienta, funcion, construir_kwargs, parametros, conexion, hoy
+                )
             )
 
             if (
@@ -376,6 +398,7 @@ def ejecutar_herramientas(
                         _kwargs_ventas_por_periodo_comparacion,
                         parametros,
                         conexion,
+                        hoy,
                     )
                 )
     finally:
