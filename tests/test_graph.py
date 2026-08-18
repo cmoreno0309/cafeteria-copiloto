@@ -79,11 +79,13 @@ def test_grafo_con_entender_stub_actualiza_estado_y_persiste_checkpoint(
         parametros=ParametrosPregunta(),
     )
     monkeypatch.setattr(
-        "core.graph._clasificar", lambda pregunta, hoy=None: salida_canned
+        "core.graph._clasificar", lambda pregunta, hoy=None, config=None: salida_canned
     )
     monkeypatch.setattr(
         "core.graph._generar_respuesta",
-        lambda pregunta, resultados: SalidaRedactar(respuesta="respuesta de prueba"),
+        lambda pregunta, resultados, config=None: SalidaRedactar(
+            respuesta="respuesta de prueba"
+        ),
     )
 
     checkpointer = _checkpointer(tmp_path / "checkpoints.db")
@@ -322,7 +324,7 @@ def test_ejecutar_herramientas_margen_sin_mes_no_devuelve_vacio_silencioso(conn_
 
 
 def test_redactar_pregunta_ambigua_usa_el_motivo_sin_llamar_al_llm(monkeypatch):
-    def _fallar_si_se_llama(pregunta, resultados):
+    def _fallar_si_se_llama(pregunta, resultados, config=None):
         raise AssertionError(
             "redactar no deberia llamar al LLM cuando la intencion es ambigua"
         )
@@ -339,7 +341,7 @@ def test_redactar_pregunta_ambigua_usa_el_motivo_sin_llamar_al_llm(monkeypatch):
 
 
 def test_redactar_sin_intencion_no_llama_al_llm(monkeypatch):
-    def _fallar_si_se_llama(pregunta, resultados):
+    def _fallar_si_se_llama(pregunta, resultados, config=None):
         raise AssertionError("redactar no deberia llamar al LLM sin intencion")
 
     monkeypatch.setattr("core.graph._generar_respuesta", _fallar_si_se_llama)
@@ -773,7 +775,9 @@ def test_proponer_accion_no_llama_interrupt_si_la_propuesta_es_ambigua(
 
 
 def test_proponer_accion_via_grafo_pausa_y_no_inserta_nada(tmp_path, monkeypatch, ruta_compra):
-    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr(
+        "core.graph._clasificar", lambda pregunta, hoy=None, config=None: _salida_accion()
+    )
     monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
 
     checkpointer = _checkpointer(tmp_path / "checkpoints.db")
@@ -797,7 +801,9 @@ def test_proponer_accion_via_grafo_pausa_y_no_inserta_nada(tmp_path, monkeypatch
 
 
 def test_grafo_reanudado_con_aprobacion_inserta_una_fila(tmp_path, monkeypatch, ruta_compra):
-    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr(
+        "core.graph._clasificar", lambda pregunta, hoy=None, config=None: _salida_accion()
+    )
     monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
 
     checkpointer = _checkpointer(tmp_path / "checkpoints.db")
@@ -824,7 +830,9 @@ def test_grafo_reanudado_con_aprobacion_inserta_una_fila(tmp_path, monkeypatch, 
 
 
 def test_grafo_reanudado_con_rechazo_no_inserta(tmp_path, monkeypatch, ruta_compra):
-    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr(
+        "core.graph._clasificar", lambda pregunta, hoy=None, config=None: _salida_accion()
+    )
     monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
 
     checkpointer = _checkpointer(tmp_path / "checkpoints.db")
@@ -843,7 +851,7 @@ def test_grafo_reanudado_con_rechazo_no_inserta(tmp_path, monkeypatch, ruta_comp
 
 
 def test_dos_threads_en_pausa_no_se_pisan(tmp_path, monkeypatch, ruta_compra_multi_proveedor):
-    def _clasificar_canned(pregunta, hoy=None):
+    def _clasificar_canned(pregunta, hoy=None, config=None):
         if "frutas" in pregunta:
             return _salida_accion(proveedor="Mercado de Frutas")
         return _salida_accion(proveedor="Lacteos Norte")
@@ -899,7 +907,9 @@ def test_grafo_con_estado_minimo_y_propuesta_ambigua_no_crashea(
     devuelve {"respuesta": ...} y accion_propuesta nunca se setea. El grafo
     no deberia seguir a aplicar_accion en ese caso.
     """
-    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr(
+        "core.graph._clasificar", lambda pregunta, hoy=None, config=None: _salida_accion()
+    )
     monkeypatch.setattr(
         "core.graph.get_conn", lambda: get_conn(ruta_compra_multi_proveedor)
     )
@@ -924,7 +934,9 @@ def test_orden_insertada_usa_las_cantidades_aprobadas_no_el_stock_actual(
     la fila insertada debe tener las cantidades que se aprobaron, no una
     version recalculada contra el stock nuevo.
     """
-    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr(
+        "core.graph._clasificar", lambda pregunta, hoy=None, config=None: _salida_accion()
+    )
     monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
 
     checkpointer = _checkpointer(tmp_path / "checkpoints.db")
@@ -966,7 +978,9 @@ def test_checkpointer_no_emite_warnings_de_deserializacion_no_registrada(
     type" al releerse desde el checkpoint - incluso desde un proceso nuevo
     apuntando al mismo archivo, como hacen los scripts de scripts/manual/.
     """
-    monkeypatch.setattr("core.graph._clasificar", lambda pregunta, hoy=None: _salida_accion())
+    monkeypatch.setattr(
+        "core.graph._clasificar", lambda pregunta, hoy=None, config=None: _salida_accion()
+    )
     monkeypatch.setattr("core.graph.get_conn", lambda: get_conn(ruta_compra))
 
     ruta_checkpoints = tmp_path / "checkpoints.db"

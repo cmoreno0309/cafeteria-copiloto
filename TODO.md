@@ -49,7 +49,13 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
       redacción del dataset (V3, no del agente — ver
       `evals/resultado_final_1.18.md` para las dos lecturas y el criterio
       de cuándo pedir aclaración)
-- [ ] **1.19** Langfuse en Docker: trazas con costo y latencia por consulta
+- [ ] **1.19** Langfuse en Docker: trazas con costo y latencia por consulta.
+      Instrumentación lista (`core/tracing.py`, `config` propagado por
+      `entender`/`redactar`, `evals/run_evals.py` etiqueta cada corrida con
+      un `session_id`, `evals/costo_langfuse.py` reporta costo/latencia
+      agregados). Falta: levantar el contenedor (ver `LANGFUSE.md`, lo
+      levanta el usuario), poner las claves en `.env`, y correr los 15
+      casos de verdad para tener el costo total y el promedio real
 
 ### Cierre de fase
 

@@ -8,6 +8,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Literal, TypedDict
 
+from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -212,11 +213,17 @@ def normalizar_insumo(insumo: str, conn: sqlite3.Connection) -> str:
     return coincidencias[0] if coincidencias else insumo
 
 
-def _clasificar(pregunta: str, hoy: date | None = None) -> SalidaEntender:
+def _clasificar(
+    pregunta: str, hoy: date | None = None, config: RunnableConfig | None = None
+) -> SalidaEntender:
     """Llama a Gemini para clasificar la intencion y extraer parametros.
 
     Separada de entender() para poder monkeypatchearla en pruebas sin llamar
-    a la API real.
+    a la API real. `config` se reenvia tal cual a la llamada del LLM: es lo
+    que hace que los callbacks de Langfuse (tarea 1.19), si estan activos,
+    vean esta llamada y le puedan medir tokens/costo/latencia. Sin eso, el
+    cliente de Gemini que se crea aca abajo queda fuera de la cadena de
+    callbacks de LangGraph, aunque el nodo entender() sea parte del grafo.
     """
     fecha_ancla = hoy if hoy is not None else date.today()
     cliente = ChatGoogleGenerativeAI(
@@ -239,12 +246,20 @@ def _clasificar(pregunta: str, hoy: date | None = None) -> SalidaEntender:
         "ambigua=True y explica por que en motivo, en vez de adivinar.\n\n"
         f"Pregunta: {pregunta}"
     )
-    return modelo_estructurado.invoke(prompt)
+    return modelo_estructurado.invoke(prompt, config=config)
 
 
-def entender(estado: EstadoGrafo) -> dict:
-    """Clasifica la intencion de la pregunta y extrae sus parametros."""
-    salida = _clasificar(estado["pregunta"], hoy=estado.get("hoy"))
+def entender(estado: EstadoGrafo, config=None) -> dict:
+    """Clasifica la intencion de la pregunta y extrae sus parametros.
+
+    `config` (sin anotar a proposito) es el parametro que LangGraph inyecta
+    automaticamente con el RunnableConfig de la corrida actual — asi es
+    como llegan los callbacks de Langfuse (tarea 1.19) hasta la llamada a
+    Gemini de _clasificar. Anotarlo como `RunnableConfig | None` rompe esa
+    deteccion automatica (LangGraph solo reconoce `RunnableConfig`,
+    `Optional[RunnableConfig]` o ningun tipo, no la sintaxis `X | None`).
+    """
+    salida = _clasificar(estado["pregunta"], hoy=estado.get("hoy"), config=config)
 
     parametros = salida.parametros
     if parametros.insumo:
@@ -617,12 +632,14 @@ def _resultados_para_prompt(resultados: list[ResultadoHerramienta]) -> str:
 
 
 def _generar_respuesta(
-    pregunta: str, resultados: list[ResultadoHerramienta]
+    pregunta: str,
+    resultados: list[ResultadoHerramienta],
+    config: RunnableConfig | None = None,
 ) -> SalidaRedactar:
     """Llama a Gemini para redactar la respuesta final.
 
     Separada de redactar() para poder monkeypatchearla en pruebas sin llamar
-    a la API real.
+    a la API real. Ver la nota de `config` en _clasificar: mismo motivo.
     """
     cliente = ChatGoogleGenerativeAI(
         model=get_gemini_model(), google_api_key=get_gemini_api_key()
@@ -663,10 +680,10 @@ def _generar_respuesta(
         f"Pregunta: {pregunta}\n\n"
         f"Resultados:\n{_resultados_para_prompt(resultados)}"
     )
-    return modelo_estructurado.invoke(prompt)
+    return modelo_estructurado.invoke(prompt, config=config)
 
 
-def redactar(estado: EstadoGrafo) -> dict:
+def redactar(estado: EstadoGrafo, config=None) -> dict:
     """Redacta la respuesta final en lenguaje natural.
 
     Si la intencion vino ambigua (o no se pudo clasificar), no hay
@@ -674,6 +691,8 @@ def redactar(estado: EstadoGrafo) -> dict:
     entender, sin llamar al LLM de nuevo. Es la misma explicacion en
     lenguaje natural, y evita el costo y el riesgo de una segunda llamada
     que podria inventar una respuesta donde no la hay.
+
+    `config` sin anotar a proposito: ver la nota equivalente en entender().
     """
     intencion = estado["intencion"]
     if intencion is None or intencion.ambigua:
@@ -682,7 +701,9 @@ def redactar(estado: EstadoGrafo) -> dict:
             "respuesta": motivo or "No entendí la pregunta, ¿podrías reformularla?"
         }
 
-    salida = _generar_respuesta(estado["pregunta"], estado["resultados_herramientas"])
+    salida = _generar_respuesta(
+        estado["pregunta"], estado["resultados_herramientas"], config=config
+    )
     return {"respuesta": salida.respuesta}
 
 

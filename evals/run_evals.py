@@ -21,14 +21,17 @@ import shutil
 import sqlite3
 import tempfile
 import unicodedata
+import uuid
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 import yaml
+from langfuse import get_client
 
 import core.db as db
 from core.graph import EstadoGrafo, ErrorHerramienta, _checkpointer, construir_grafo
+from core.tracing import callbacks_langfuse, trazas_habilitadas
 
 RUTA_DATASET = Path("evals/dataset.yaml")
 RUTA_RESULTADOS = Path("evals/resultados.md")
@@ -232,9 +235,19 @@ def _evaluar_valor(
     raise ValueError(f"tipo de caso desconocido en el dataset: {tipo}")
 
 
-def _correr_caso(grafo, caso: dict, fecha_referencia: date, ruta_db_temporal: Path) -> ResultadoCaso:
+def _correr_caso(
+    grafo,
+    caso: dict,
+    fecha_referencia: date,
+    ruta_db_temporal: Path,
+    session_id: str,
+) -> ResultadoCaso:
     thread_id = f"eval-{fecha_referencia.isoformat()}-{caso['id']}"
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "callbacks": callbacks_langfuse(),
+        "metadata": {"langfuse_session_id": session_id, "langfuse_tags": ["evals"]},
+    }
     estado_inicial: EstadoGrafo = {"pregunta": caso["pregunta"], "hoy": fecha_referencia}
 
     ordenes_antes = _contar_ordenes(ruta_db_temporal)
@@ -374,6 +387,7 @@ def _parsear_args() -> argparse.Namespace:
 def main() -> None:
     args = _parsear_args()
     casos = _cargar_dataset()
+    session_id = f"evals-{args.fecha_referencia.isoformat()}-{uuid.uuid4().hex[:8]}"
 
     with tempfile.TemporaryDirectory(prefix="cafeteria_evals_") as directorio:
         ruta_db_temporal = Path(directorio) / "cafeteria.db"
@@ -386,7 +400,7 @@ def main() -> None:
         try:
             grafo = construir_grafo(checkpointer=checkpointer)
             resultados = [
-                _correr_caso(grafo, caso, args.fecha_referencia, ruta_db_temporal)
+                _correr_caso(grafo, caso, args.fecha_referencia, ruta_db_temporal, session_id)
                 for caso in casos
             ]
         finally:
@@ -399,6 +413,14 @@ def main() -> None:
 
     _escribir_resultados(resultados, args.fecha_referencia)
     _imprimir_resumen(resultados)
+
+    if trazas_habilitadas():
+        # flush(): este es un script corto, sin el flush el proceso puede
+        # terminar antes de que el exporter en background mande las trazas
+        # pendientes a Langfuse.
+        get_client().flush()
+        print(f"Trazas en Langfuse, session_id: {session_id}")
+        print(f"  py -m evals.costo_langfuse {session_id}")
 
 
 if __name__ == "__main__":
