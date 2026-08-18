@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+.env.langfuse
 data/*.db
 data/*.sqlite
 evals/resultados.md
