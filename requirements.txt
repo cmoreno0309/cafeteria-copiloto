@@ -1,0 +1,10 @@
+python-dotenv==1.2.2
+pydantic==2.13.4
+langchain-core==1.5.6
+langchain-google-genai==4.3.3
+langgraph==1.2.11
+langgraph-checkpoint-sqlite==3.1.1
+langfuse==4.14.4
+PyYAML==6.0.3
+mcp[cli]==2.0.0
+pytest==9.1.1

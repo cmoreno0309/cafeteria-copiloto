@@ -23,8 +23,25 @@ NO es un punto de venta. NO toma pedidos. NO cobra.
 - langchain-google-genai para llamar a Gemini con salida estructurada Pydantic
   (`ChatGoogleGenerativeAI(...).with_structured_output(Modelo)`)
 - langgraph-checkpoint-sqlite para el checkpointer del grafo (`SqliteSaver`)
+- mcp[cli] para el servidor MCP de solo lectura (`channels/mcp_server.py`)
 
 No agregues dependencias sin decirlo en el resumen de la tarea.
+
+## Entorno
+
+`requirements.txt` fija las versiones exactas de las dependencias directas
+(las que el código importa, no el volcado completo de `pip list`: las
+transitivas las resuelve pip solo). Reconstruir el entorno desde cero:
+
+```bash
+py -m venv .venv
+.venv\Scripts\activate          # PowerShell/cmd
+py -m pip install -r requirements.txt
+```
+
+Si agregás una dependencia nueva (avisando en el resumen de la tarea, como
+pide la regla de arriba), sumala a `requirements.txt` con la versión exacta
+que quedó instalada (`pip show <paquete>`), no solo al entorno local.
 
 ## Configuración (variables de entorno)
 
