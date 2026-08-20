@@ -66,11 +66,13 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 
 - [x] **1.20** `channels/mcp_server.py` exponiendo las 6 herramientas de lectura
 - [ ] **1.21** Conectarlo a Claude Desktop y usarlo un día
-- [ ] **1.22** README: diagrama del grafo, tabla de evaluación antes/después,
+- [x] **1.22** README: diagrama del grafo, tabla de evaluación antes/después,
       captura de una traza con el costo. La tabla antes/después debe
       mostrar las dos lecturas de V3 (dataset original 14/15 valor vs.
       V3 corregido 15/15 valor), no solo el resultado final — ver
-      `evals/resultado_final_1.18.md`
+      `evals/resultado_final_1.18.md`. Capturas (traza de Langfuse,
+      conversación con cliente MCP) quedan marcadas como pendientes en el
+      README: no se generaron en esta tarea.
 
 ## Fase 2 — Telegram (2 días)
 
