@@ -89,7 +89,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
       respuesta, y el `grafo.invoke()` bloqueante corre en un hilo aparte
       (`asyncio.to_thread`) para no frenar el loop de eventos ni otras
       conversaciones mientras dura la llamada a Gemini.
-- [ ] **2.2** Botones inline Aprobar / Corregir sobre el `interrupt`. El
+- [x] **2.2** Botones inline Aprobar / Corregir sobre el `interrupt`. El
       `callback_data` lleva `thread_id` + decisión; al presionar, resume con
       `Command(resume=DecisionAprobacion(...))`, con `aprobada_por` = el
       usuario de Telegram que tocó el botón. El mensaje con los botones se

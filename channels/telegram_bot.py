@@ -1,14 +1,15 @@
-"""Bot de Telegram: canal de solo lectura sobre el grafo (tarea 2.1).
+"""Bot de Telegram: canal de lectura y aprobacion sobre el grafo (2.1/2.2).
 
 Envoltorio delgado (regla 4 de CLAUDE.md): no contiene ninguna consulta SQL
 ni logica de negocio, solo traduce mensajes de Telegram hacia el grafo
 (core/graph.py) y la respuesta de vuelta. El grafo decide que herramienta
-llamar; este modulo no sabe que herramientas existen.
+llamar y si una propuesta de compra es valida; este modulo no sabe nada de
+eso, solo dibuja lo que el grafo ya decidio y reenvia la decision humana.
 
 Autorizacion: un unico chat_id autorizado (TELEGRAM_CHAT_ID en .env, el
-mismo dueño que despues aprueba las compras). Cualquier otro chat recibe un
-aviso de "no autorizado" y nunca llega a invocar el grafo, ni siquiera para
-una consulta de lectura.
+mismo dueño que aprueba las compras). Cualquier otro chat recibe un aviso
+de "no autorizado" y nunca llega a invocar el grafo, ni siquiera para una
+consulta de lectura ni para tocar un boton de aprobacion.
 
 thread_id = str(chat.id): un chat de Telegram es un thread del checkpointer
 (data/checkpoints.db), el mismo esquema que ya usan scripts/manual/.
@@ -25,6 +26,16 @@ se manda al grafo. Invocar sobre un thread pausado lo tomaria como un run
 nuevo desde START y dejaria la propuesta pendiente huerfana, sin forma de
 retomarla despues -- misma raiz que el bug de la tarea 1.13: asumir que el
 estado del thread esta "limpio" sin chequearlo primero.
+
+Botones Aprobar/Corregir (2.2): el callback_data lleva la accion y el
+thread_id ("aprobar:<thread_id>" / "corregir:<thread_id>"). Al tocar un
+boton, el mensaje original se edita in-place (texto + se sacan los botones)
+en vez de mandar uno nuevo, para que un segundo tap sobre el mismo mensaje
+no tenga botones que tocar. Igual, por si el tap ya viajaba antes de esa
+edicion (o el callback llega para un thread que ya no esta pausado por
+cualquier otro motivo), manejar_aprobacion chequea el estado del grafo
+antes de reanudar: si ya no hay interrupt pendiente, no reintenta el resume
+a ciegas.
 """
 
 import asyncio
@@ -32,9 +43,16 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from telegram import Chat, Update
+from langgraph.types import Command
+from telegram import Chat, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
-from telegram.ext import Application, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from core.config import get_telegram_bot_token, get_telegram_chat_id
 from core.graph import construir_grafo
@@ -54,16 +72,16 @@ MENSAJE_PROPUESTA_PENDIENTE = (
     "siguiente): resolvela por otro canal antes de preguntar otra cosa."
 )
 
-MENSAJE_INTERRUPCION_SIN_BOTONES = (
-    "Esa pregunta arma una propuesta de compra que necesita aprobacion "
-    "humana, y todavia no puedo pedirtela por aca (llega en una tarea "
-    "siguiente)."
+MENSAJE_PROPUESTA_YA_RESUELTA = (
+    "Esa propuesta ya se resolvio antes; no hay nada pendiente en este chat."
 )
 
 MENSAJE_ERROR_INESPERADO = (
     "Tuve un problema respondiendo esa pregunta. Ya quedo registrado en el "
     "log; proba de nuevo en un momento."
 )
+
+PATRON_CALLBACK_APROBACION = r"^(aprobar|corregir):(.+)$"
 
 
 def _autorizado(chat_id: int) -> bool:
@@ -96,9 +114,30 @@ def _config_grafo(thread_id: str) -> dict:
 
 
 def _mensaje_desde_resultado(resultado: dict) -> str:
-    if "__interrupt__" in resultado:
-        return MENSAJE_INTERRUPCION_SIN_BOTONES
     return resultado.get("respuesta") or "No obtuve una respuesta para esa pregunta."
+
+
+def _texto_propuesta(propuesta: dict) -> str:
+    lineas = [f"Propuesta de compra a {propuesta['proveedor']}:"]
+    for item in propuesta["items"]:
+        lineas.append(
+            f"- {item['insumo']}: {item['cantidad']} {item['unidad']} "
+            f"(urgencia: {item['urgencia']}, "
+            f"costo unitario estimado: {item['costo_unitario_estimado']})"
+        )
+    lineas.append(f"Total estimado: {propuesta['total_estimado']}")
+    return "\n".join(lineas)
+
+
+def _teclado_aprobacion(thread_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Aprobar", callback_data=f"aprobar:{thread_id}"),
+                InlineKeyboardButton("Corregir", callback_data=f"corregir:{thread_id}"),
+            ]
+        ]
+    )
 
 
 async def _mantener_escribiendo(chat: Chat) -> None:
@@ -136,7 +175,41 @@ async def manejar_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     finally:
         tarea_typing.cancel()
 
+    if "__interrupt__" in resultado:
+        propuesta = resultado["__interrupt__"][0].value
+        await update.message.reply_text(
+            _texto_propuesta(propuesta), reply_markup=_teclado_aprobacion(thread_id)
+        )
+        return
+
     await update.message.reply_text(_mensaje_desde_resultado(resultado))
+
+
+async def manejar_aprobacion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    chat = update.effective_chat
+    if not _autorizado(chat.id):
+        logger.warning("callback de chat no autorizado: %s", chat.id)
+        return
+
+    accion, thread_id = query.data.split(":", 1)
+    grafo = context.bot_data["grafo"]
+    config = _config_grafo(thread_id)
+
+    if not grafo.get_state(config).next:
+        await query.edit_message_text(
+            f"{query.message.text}\n\n{MENSAJE_PROPUESTA_YA_RESUELTA}", reply_markup=None
+        )
+        return
+
+    aprobada_por = update.effective_user.full_name if update.effective_user else None
+    decision = {"aprobada": accion == "aprobar", "aprobada_por": aprobada_por}
+    resultado = await asyncio.to_thread(grafo.invoke, Command(resume=decision), config)
+
+    texto = f"{query.message.text}\n\n{_mensaje_desde_resultado(resultado)}"
+    await query.edit_message_text(texto, reply_markup=None)
 
 
 async def manejar_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -160,6 +233,9 @@ def construir_aplicacion() -> Application:
     aplicacion = Application.builder().token(get_telegram_bot_token()).build()
     aplicacion.bot_data["grafo"] = construir_grafo()
     aplicacion.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_pregunta))
+    aplicacion.add_handler(
+        CallbackQueryHandler(manejar_aprobacion, pattern=PATRON_CALLBACK_APROBACION)
+    )
     aplicacion.add_error_handler(manejar_error)
     return aplicacion
 
