@@ -7,8 +7,7 @@ registren. No es un punto de venta, no toma pedidos ni cobra: es una capa de
 consulta y decisión sobre los datos que el negocio ya genera.
 
 > Los datos de este repo (`data/cafeteria.db`, generados por
-> `scripts/seed.py`) son sintéticos a propósito. Los datos reales del
-> negocio no van a un repositorio público.
+> `scripts/seed.py`) son sintéticos a propósito.
 
 ## Arquitectura
 
