@@ -65,7 +65,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 ### Cierre de fase
 
 - [x] **1.20** `channels/mcp_server.py` exponiendo las 6 herramientas de lectura
-- [ ] **1.21** Conectarlo a Claude Desktop y usarlo un día
+- [x] **1.21** Conectarlo a Claude Desktop y usarlo un día
 - [x] **1.22** README: diagrama del grafo, tabla de evaluación antes/después,
       captura de una traza con el costo. La tabla antes/después debe
       mostrar las dos lecturas de V3 (dataset original 14/15 valor vs.
