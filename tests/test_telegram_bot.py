@@ -1,9 +1,11 @@
 """Pruebas de channels/telegram_bot.py."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from telegram import Update
 from telegram.constants import ChatAction
 
 from channels import telegram_bot
@@ -131,3 +133,61 @@ def test_manejar_pregunta_manda_la_accion_de_escribiendo_mientras_corre(monkeypa
     asyncio.run(telegram_bot.manejar_pregunta(update, context))
 
     update.effective_chat.send_action.assert_awaited_with(ChatAction.TYPING)
+
+
+def test_manejar_pregunta_propaga_la_excepcion_y_cancela_el_typing(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
+    grafo = MagicMock()
+    grafo.get_state.return_value = MagicMock(next=())
+    grafo.invoke.side_effect = RuntimeError("Gemini caido")
+    update, context = _update_y_context(12345, "una pregunta", grafo)
+
+    with pytest.raises(RuntimeError, match="Gemini caido"):
+        asyncio.run(telegram_bot.manejar_pregunta(update, context))
+
+    update.message.reply_text.assert_not_awaited()
+
+
+def test_manejar_error_loguea_y_avisa_por_telegram(caplog):
+    update = MagicMock(spec=Update)
+    update.effective_message = MagicMock()
+    update.effective_message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.error = RuntimeError("boom")
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(telegram_bot.manejar_error(update, context))
+
+    update.effective_message.reply_text.assert_awaited_once_with(
+        telegram_bot.MENSAJE_ERROR_INESPERADO
+    )
+    assert "excepcion sin capturar" in caplog.text
+
+
+def test_manejar_error_no_crashea_si_no_hay_update(caplog):
+    context = MagicMock()
+    context.error = RuntimeError("boom sin update asociado")
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(telegram_bot.manejar_error(None, context))
+
+    assert "excepcion sin capturar" in caplog.text
+
+
+def test_construir_aplicacion_registra_el_manejador_de_error(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:token-de-prueba")
+    aplicacion = telegram_bot.construir_aplicacion()
+
+    assert telegram_bot.manejar_error in aplicacion.error_handlers
+
+
+def test_configurar_logging_crea_el_archivo_de_log(tmp_path, monkeypatch):
+    ruta = tmp_path / "logs" / "telegram.log"
+    monkeypatch.setattr(telegram_bot, "RUTA_LOG", ruta)
+
+    handlers_previos = list(logging.getLogger().handlers)
+    try:
+        telegram_bot._configurar_logging()
+        assert ruta.exists()
+    finally:
+        logging.getLogger().handlers = handlers_previos

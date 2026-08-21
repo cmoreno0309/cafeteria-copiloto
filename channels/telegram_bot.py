@@ -29,6 +29,8 @@ estado del thread esta "limpio" sin chequearlo primero.
 
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from telegram import Chat, Update
 from telegram.constants import ChatAction
@@ -42,6 +44,8 @@ logger = logging.getLogger(__name__)
 
 INTERVALO_TYPING_SEGUNDOS = 4.0
 
+RUTA_LOG = Path("logs/telegram.log")
+
 MENSAJE_NO_AUTORIZADO = "Este bot es privado y no esta habilitado para este chat."
 
 MENSAJE_PROPUESTA_PENDIENTE = (
@@ -54,6 +58,11 @@ MENSAJE_INTERRUPCION_SIN_BOTONES = (
     "Esa pregunta arma una propuesta de compra que necesita aprobacion "
     "humana, y todavia no puedo pedirtela por aca (llega en una tarea "
     "siguiente)."
+)
+
+MENSAJE_ERROR_INESPERADO = (
+    "Tuve un problema respondiendo esa pregunta. Ya quedo registrado en el "
+    "log; proba de nuevo en un momento."
 )
 
 
@@ -130,15 +139,51 @@ async def manejar_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await update.message.reply_text(_mensaje_desde_resultado(resultado))
 
 
+async def manejar_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Error handler global de la Application (regla 4: es resiliencia del
+    canal, no logica de negocio).
+
+    Sin esto, una excepcion que no sea ValueError (ej. Gemini caido, timeout
+    de red -- las de negocio ya las captura ejecutar_herramientas como
+    ErrorHerramienta) quedaba solo en el log del proceso, sin que quien
+    escribio se enterara siquiera de que su pregunta no se proceso.
+    `update` llega tipado `object` porque PTB lo pasa tal cual al error
+    handler y puede no ser un Update (ej. un error de red del propio
+    polling, sin update asociado).
+    """
+    logger.error("excepcion sin capturar procesando un update", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message is not None:
+        await update.effective_message.reply_text(MENSAJE_ERROR_INESPERADO)
+
+
 def construir_aplicacion() -> Application:
     aplicacion = Application.builder().token(get_telegram_bot_token()).build()
     aplicacion.bot_data["grafo"] = construir_grafo()
     aplicacion.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_pregunta))
+    aplicacion.add_error_handler(manejar_error)
     return aplicacion
 
 
+def _configurar_logging() -> None:
+    """INFO a consola y a logs/telegram.log (rotado a 1MB x 3 archivos).
+
+    El archivo permite revisar despues que paso en una corrida que ya
+    termino -- la consola sola se pierde apenas se cierra la terminal.
+    """
+    RUTA_LOG.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            RotatingFileHandler(RUTA_LOG, maxBytes=1_000_000, backupCount=3, encoding="utf-8"),
+        ],
+        force=True,
+    )
+
+
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    _configurar_logging()
     construir_aplicacion().run_polling()
 
 
