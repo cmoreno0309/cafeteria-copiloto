@@ -38,6 +38,11 @@ def test_autorizado_devuelve_false_si_el_chat_id_no_coincide(monkeypatch):
     assert telegram_bot._autorizado(99999) is False
 
 
+def test_autorizado_devuelve_false_sin_explotar_si_falta_telegram_chat_id(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    assert telegram_bot._autorizado(12345) is False
+
+
 def test_config_grafo_usa_el_thread_id_y_tagea_telegram():
     config = telegram_bot._config_grafo("12345")
     assert config["configurable"]["thread_id"] == "12345"
@@ -72,6 +77,19 @@ def test_manejar_pregunta_chat_no_autorizado_no_invoca_el_grafo(monkeypatch):
 
     grafo.invoke.assert_not_called()
     update.message.reply_text.assert_awaited_once_with(telegram_bot.MENSAJE_NO_AUTORIZADO)
+
+
+def test_manejar_pregunta_sin_telegram_chat_id_configurada_no_crashea(monkeypatch, caplog):
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    grafo = MagicMock()
+    update, context = _update_y_context(12345, "¿cuánto stock hay?", grafo)
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(telegram_bot.manejar_pregunta(update, context))
+
+    grafo.invoke.assert_not_called()
+    update.message.reply_text.assert_awaited_once_with(telegram_bot.MENSAJE_NO_AUTORIZADO)
+    assert "12345" in caplog.text
 
 
 def test_manejar_pregunta_con_propuesta_pendiente_no_invoca_el_grafo(monkeypatch):

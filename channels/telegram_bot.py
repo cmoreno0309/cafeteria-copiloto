@@ -58,7 +58,20 @@ MENSAJE_INTERRUPCION_SIN_BOTONES = (
 
 
 def _autorizado(chat_id: int) -> bool:
-    return str(chat_id) == get_telegram_chat_id()
+    """False tambien si TELEGRAM_CHAT_ID no esta configurada todavia.
+
+    get_telegram_chat_id() es obligatoria (lanza RuntimeError si falta) por
+    disenio: no hay chat autorizado por default. Pero manejar_pregunta
+    necesita loguear el chat_id de cualquier mensaje que llegue -- incluido
+    antes de que la dueña haya cargado el valor en .env, que es como se
+    bootstrapea ese valor la primera vez -- asi que ese caso no puede
+    propagarse como excepcion sin respuesta.
+    """
+    try:
+        chat_id_autorizado = get_telegram_chat_id()
+    except RuntimeError:
+        return False
+    return str(chat_id) == chat_id_autorizado
 
 
 def _config_grafo(thread_id: str) -> dict:
