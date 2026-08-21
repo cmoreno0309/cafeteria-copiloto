@@ -4,6 +4,8 @@ __pycache__/
 .env
 .env.langfuse
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/*.sqlite
 evals/resultados.md
 !evals/baseline_*.md

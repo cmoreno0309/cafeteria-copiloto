@@ -36,6 +36,36 @@ def get_gemini_model() -> str:
     return modelo
 
 
+def get_telegram_bot_token() -> str:
+    """Devuelve TELEGRAM_BOT_TOKEN o falla con un mensaje claro si falta."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise RuntimeError(
+            "Falta TELEGRAM_BOT_TOKEN. Copia .env.example a .env y completa "
+            "el valor (se saca hablando con @BotFather en Telegram) antes "
+            "de continuar."
+        )
+    return token
+
+
+def get_telegram_chat_id() -> str:
+    """Devuelve TELEGRAM_CHAT_ID o falla con un mensaje claro si falta.
+
+    Es el unico chat autorizado a hablar con el bot (channels/telegram_bot.py):
+    a diferencia de GEMINI_MODEL, no tiene un default razonable -- sin este
+    valor el bot no puede distinguir a la dueña de cualquier otro chat que
+    le escriba, y responderia consultas de negocio a quien sea.
+    """
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not chat_id:
+        raise RuntimeError(
+            "Falta TELEGRAM_CHAT_ID. Copia .env.example a .env y completa "
+            "el valor (se saca hablando con @userinfobot en Telegram) antes "
+            "de continuar."
+        )
+    return chat_id
+
+
 def get_langfuse_public_key() -> str | None:
     """Devuelve LANGFUSE_PUBLIC_KEY o None si falta.
 

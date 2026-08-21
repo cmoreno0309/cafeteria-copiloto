@@ -76,7 +76,7 @@ hacer commit. Si algo bloquea, anotarlo bajo la tarea y seguir con la siguiente.
 
 ## Fase 2 — Telegram (2 días)
 
-- [ ] **2.1** `channels/telegram_bot.py`, bot de solo lectura por long polling
+- [x] **2.1** `channels/telegram_bot.py`, bot de solo lectura por long polling
       (`python-telegram-bot`, dependencia nueva a confirmar antes de instalarla
       — regla de `CLAUDE.md`). `thread_id` = `str(chat.id)` de Telegram: es el
       mismo id que ya usa el checkpointer (`data/checkpoints.db`), un chat es
