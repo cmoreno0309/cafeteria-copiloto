@@ -141,6 +141,23 @@ py -m scripts.seed          # genera data/cafeteria.db con datos sintéticos
 py -m pytest -q             # pruebas unitarias (excluye las que llaman a Gemini)
 ```
 
+### Backend del modelo: API key o Vertex AI
+
+`MODEL_BACKEND` en `.env` elige cómo se llama a Gemini (`core/llm.py`,
+`construir_cliente_llm()`), sin tocar el grafo ni las herramientas:
+
+- `MODEL_BACKEND=apikey` (default si se deja vacía): usa `GEMINI_API_KEY`,
+  como siempre.
+- `MODEL_BACKEND=vertex`: usa Vertex AI. Autentica por ADC
+  (`gcloud auth application-default login`), no por API key, y necesita
+  `GOOGLE_CLOUD_PROJECT` (el proyecto con `aiplatform.googleapis.com`
+  habilitada) y `GOOGLE_CLOUD_LOCATION` (ej. `us-central1`) en `.env`.
+
+`GEMINI_MODEL` aplica igual a los dos modos. Si `MODEL_BACKEND=vertex` y
+falta `GOOGLE_CLOUD_PROJECT` o `GOOGLE_CLOUD_LOCATION`, el proceso falla al
+arrancar (al construir el grafo) con un mensaje claro, no en medio de una
+consulta.
+
 Para correr el grafo completo contra Gemini de verdad (clasificación de
 intención de `tests/test_graph.py`, cuestan dinero):
 

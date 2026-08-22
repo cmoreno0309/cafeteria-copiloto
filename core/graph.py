@@ -9,15 +9,14 @@ from pathlib import Path
 from typing import Any, Callable, Literal, TypedDict
 
 from langchain_core.runnables import RunnableConfig
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from pydantic import BaseModel
 
-from core.config import get_gemini_api_key, get_gemini_model
 from core.db import get_conn
+from core.llm import construir_cliente_llm
 from core.models import (
     Aprobacion,
     ConsumoInsumo,
@@ -226,9 +225,7 @@ def _clasificar(
     callbacks de LangGraph, aunque el nodo entender() sea parte del grafo.
     """
     fecha_ancla = hoy if hoy is not None else date.today()
-    cliente = ChatGoogleGenerativeAI(
-        model=get_gemini_model(), google_api_key=get_gemini_api_key()
-    )
+    cliente = construir_cliente_llm()
     modelo_estructurado = cliente.with_structured_output(SalidaEntender)
 
     prompt = (
@@ -641,9 +638,7 @@ def _generar_respuesta(
     Separada de redactar() para poder monkeypatchearla en pruebas sin llamar
     a la API real. Ver la nota de `config` en _clasificar: mismo motivo.
     """
-    cliente = ChatGoogleGenerativeAI(
-        model=get_gemini_model(), google_api_key=get_gemini_api_key()
-    )
+    cliente = construir_cliente_llm()
     modelo_estructurado = cliente.with_structured_output(SalidaRedactar)
 
     prompt = (
@@ -746,6 +741,7 @@ def construir_grafo(checkpointer: SqliteSaver | None = None) -> StateGraph:
                                                      -> proponer_accion -> [decidir] -> aplicar_accion -> END
                                                                          -> END (propuesta ambigua, ya redacto la respuesta)
     """
+    construir_cliente_llm()  # fail-fast: config de backend incompleta se detecta aca, no en la primera consulta
     grafo = StateGraph(EstadoGrafo)
     grafo.add_node("entender", entender)
     grafo.add_node("ejecutar_herramientas", ejecutar_herramientas)

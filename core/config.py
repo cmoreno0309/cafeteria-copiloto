@@ -10,6 +10,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 GEMINI_MODEL_POR_DEFECTO = "gemini-2.5-flash"
+MODEL_BACKEND_POR_DEFECTO = "apikey"
 LANGFUSE_HOST_POR_DEFECTO = "http://localhost:3000"
 
 
@@ -34,6 +35,57 @@ def get_gemini_model() -> str:
         )
         return GEMINI_MODEL_POR_DEFECTO
     return modelo
+
+
+def get_model_backend() -> str:
+    """Devuelve MODEL_BACKEND ("apikey" o "vertex"); "apikey" si falta.
+
+    "apikey" es el modo de siempre (GEMINI_API_KEY). "vertex" usa Vertex AI
+    con credenciales de ADC (application-default login), sin API key.
+    """
+    backend = os.getenv("MODEL_BACKEND")
+    if not backend:
+        logger.info(
+            "MODEL_BACKEND no esta definida, usando el valor por defecto: %s",
+            MODEL_BACKEND_POR_DEFECTO,
+        )
+        return MODEL_BACKEND_POR_DEFECTO
+    if backend not in ("apikey", "vertex"):
+        raise RuntimeError(
+            f"MODEL_BACKEND invalida: '{backend}'. Debe ser 'apikey' o "
+            "'vertex'."
+        )
+    return backend
+
+
+def get_gcp_project() -> str:
+    """Devuelve GOOGLE_CLOUD_PROJECT o falla con un mensaje claro si falta.
+
+    Solo hace falta con MODEL_BACKEND=vertex.
+    """
+    proyecto = os.getenv("GOOGLE_CLOUD_PROJECT")
+    if not proyecto:
+        raise RuntimeError(
+            "Falta GOOGLE_CLOUD_PROJECT. Con MODEL_BACKEND=vertex hace falta "
+            "el proyecto de GCP (el mismo que tiene aiplatform.googleapis.com "
+            "habilitada); completalo en .env."
+        )
+    return proyecto
+
+
+def get_gcp_location() -> str:
+    """Devuelve GOOGLE_CLOUD_LOCATION o falla con un mensaje claro si falta.
+
+    Solo hace falta con MODEL_BACKEND=vertex.
+    """
+    ubicacion = os.getenv("GOOGLE_CLOUD_LOCATION")
+    if not ubicacion:
+        raise RuntimeError(
+            "Falta GOOGLE_CLOUD_LOCATION. Con MODEL_BACKEND=vertex hace "
+            "falta la region de Vertex AI (ej. 'us-central1'); completala "
+            "en .env."
+        )
+    return ubicacion
 
 
 def get_telegram_bot_token() -> str:

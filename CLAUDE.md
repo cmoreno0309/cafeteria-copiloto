@@ -21,7 +21,8 @@ NO es un punto de venta. NO toma pedidos. NO cobra.
 - matplotlib para gráficos como imagen
 - python-dotenv para cargar variables de entorno desde `.env`
 - langchain-google-genai para llamar a Gemini con salida estructurada Pydantic
-  (`ChatGoogleGenerativeAI(...).with_structured_output(Modelo)`)
+  (`ChatGoogleGenerativeAI(...).with_structured_output(Modelo)`), con backend
+  elegible por config: API key directa o Vertex AI (`core/llm.py`)
 - langgraph-checkpoint-sqlite para el checkpointer del grafo (`SqliteSaver`)
 - mcp[cli] para el servidor MCP de solo lectura (`channels/mcp_server.py`)
 
@@ -45,24 +46,42 @@ que quedó instalada (`pip show <paquete>`), no solo al entorno local.
 
 ## Configuración (variables de entorno)
 
-Dos variables se leen desde un archivo `.env` en la raíz del proyecto vía
+Las variables se leen desde un archivo `.env` en la raíz del proyecto vía
 `core/config.py` (usa `python-dotenv`, `load_dotenv()` se ejecuta al
 importar el módulo). Trato distinto para cada una:
 
-- `GEMINI_API_KEY` — **obligatoria**. `core.config.get_gemini_api_key()`
-  lanza `RuntimeError` si falta o está vacía, con un mensaje que dice qué
-  archivo copiar y completar. Nunca debe fallar con el error crudo de la
-  librería de Gemini.
-- `GEMINI_MODEL` — **opcional**. `core.config.get_gemini_model()` devuelve
-  su valor si está definida; si falta o está vacía, devuelve
-  `GEMINI_MODEL_POR_DEFECTO` (`"gemini-2.5-flash"`) y registra un log de
-  nivel INFO indicando que se usó el default. Nunca falla.
+- `GEMINI_API_KEY` — **obligatoria con `MODEL_BACKEND=apikey`** (el default).
+  `core.config.get_gemini_api_key()` lanza `RuntimeError` si falta o está
+  vacía, con un mensaje que dice qué archivo copiar y completar. Nunca debe
+  fallar con el error crudo de la librería de Gemini. No se usa con
+  `MODEL_BACKEND=vertex`.
+- `GEMINI_MODEL` — **opcional, aplica a los dos backends**.
+  `core.config.get_gemini_model()` devuelve su valor si está definida; si
+  falta o está vacía, devuelve `GEMINI_MODEL_POR_DEFECTO`
+  (`"gemini-2.5-flash"`) y registra un log de nivel INFO indicando que se
+  usó el default. Nunca falla.
+- `MODEL_BACKEND` — **opcional**, `"apikey"` o `"vertex"`.
+  `core.config.get_model_backend()` cae a `"apikey"`
+  (`MODEL_BACKEND_POR_DEFECTO`) si falta, y lanza `RuntimeError` si tiene
+  cualquier otro valor.
+- `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` — **obligatorias solo
+  con `MODEL_BACKEND=vertex`**. `core.config.get_gcp_project()` /
+  `get_gcp_location()` lanzan `RuntimeError` si faltan. Con este backend la
+  autenticación sale de ADC (`gcloud auth application-default login`), no
+  de una API key.
 
-Cualquier código que necesite estos valores debe llamar a estas dos
-funciones, no leer `os.environ` directo.
+Cualquier código que necesite estos valores debe llamar a estas funciones,
+no leer `os.environ` directo.
+
+`core/llm.py` (`construir_cliente_llm()`) es el único lugar que arma el
+cliente `ChatGoogleGenerativeAI`, para cualquiera de los dos backends; el
+grafo (`core/graph.py`) la llama una vez al construir el grafo
+(`construir_grafo()`, antes de armar los nodos) para que una configuración
+incompleta falle al arrancar el proceso, no en medio de la primera
+consulta.
 
 - `.env` guarda los valores reales y está en `.gitignore`. Nunca se commitea.
-- `.env.example` documenta ambas variables vacías y sí se commitea.
+- `.env.example` documenta todas las variables vacías y sí se commitea.
 - Para configurar: copiar `.env.example` a `.env` y completar los valores.
 
 ## Estructura de carpetas
@@ -73,6 +92,7 @@ core/
   db.py            conexión y DDL
   models.py        modelos Pydantic de entrada/salida de herramientas
   tools/           una herramienta por archivo, SQL puro, sin LLM
+  llm.py           construir_cliente_llm(): cliente Gemini, backend apikey/vertex
   graph.py         el grafo LangGraph
 channels/
   mcp_server.py    expone las herramientas de lectura por MCP
