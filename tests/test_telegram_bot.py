@@ -108,9 +108,9 @@ def test_texto_propuesta_incluye_proveedor_items_y_total():
 def test_teclado_aprobacion_arma_los_dos_botones_con_el_thread_id():
     teclado = telegram_bot._teclado_aprobacion("12345")
     (fila,) = teclado.inline_keyboard
-    aprobar, corregir = fila
+    aprobar, rechazar = fila
     assert aprobar.callback_data == "aprobar:12345"
-    assert corregir.callback_data == "corregir:12345"
+    assert rechazar.callback_data == "rechazar:12345"
 
 
 def test_manejar_pregunta_chat_no_autorizado_no_invoca_el_grafo(monkeypatch):
@@ -192,7 +192,7 @@ def test_manejar_pregunta_con_interrupt_manda_la_propuesta_con_botones(monkeypat
     teclado = kwargs["reply_markup"]
     (fila,) = teclado.inline_keyboard
     assert fila[0].callback_data == "aprobar:12345"
-    assert fila[1].callback_data == "corregir:12345"
+    assert fila[1].callback_data == "rechazar:12345"
 
 
 def test_manejar_pregunta_propaga_la_excepcion_y_cancela_el_typing(monkeypatch):
@@ -281,14 +281,14 @@ def test_manejar_aprobacion_aprobar_resume_con_aprobada_true_y_el_nombre_de_quie
     assert kwargs["reply_markup"] is None
 
 
-def test_manejar_aprobacion_corregir_resume_con_aprobada_false(monkeypatch):
+def test_manejar_aprobacion_rechazar_resume_con_aprobada_false(monkeypatch):
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
     grafo = MagicMock()
     grafo.get_state.return_value = MagicMock(next=("proponer_accion",))
     grafo.invoke.return_value = {
         "respuesta": "Orden de Mercado de Frutas no creada: quedó rechazada."
     }
-    update, context = _update_callback(12345, "corregir:12345", grafo, "Propuesta original")
+    update, context = _update_callback(12345, "rechazar:12345", grafo, "Propuesta original")
 
     asyncio.run(telegram_bot.manejar_aprobacion(update, context))
 

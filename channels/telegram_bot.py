@@ -27,8 +27,8 @@ nuevo desde START y dejaria la propuesta pendiente huerfana, sin forma de
 retomarla despues -- misma raiz que el bug de la tarea 1.13: asumir que el
 estado del thread esta "limpio" sin chequearlo primero.
 
-Botones Aprobar/Corregir (2.2): el callback_data lleva la accion y el
-thread_id ("aprobar:<thread_id>" / "corregir:<thread_id>"). Al tocar un
+Botones Aprobar/Rechazar (2.2): el callback_data lleva la accion y el
+thread_id ("aprobar:<thread_id>" / "rechazar:<thread_id>"). Al tocar un
 boton, el mensaje original se edita in-place (texto + se sacan los botones)
 en vez de mandar uno nuevo, para que un segundo tap sobre el mismo mensaje
 no tenga botones que tocar. Igual, por si el tap ya viajaba antes de esa
@@ -81,7 +81,7 @@ MENSAJE_ERROR_INESPERADO = (
     "log; proba de nuevo en un momento."
 )
 
-PATRON_CALLBACK_APROBACION = r"^(aprobar|corregir):(.+)$"
+PATRON_CALLBACK_APROBACION = r"^(aprobar|rechazar):(.+)$"
 
 
 def _autorizado(chat_id: int) -> bool:
@@ -134,7 +134,7 @@ def _teclado_aprobacion(thread_id: str) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton("Aprobar", callback_data=f"aprobar:{thread_id}"),
-                InlineKeyboardButton("Corregir", callback_data=f"corregir:{thread_id}"),
+                InlineKeyboardButton("Rechazar", callback_data=f"rechazar:{thread_id}"),
             ]
         ]
     )
@@ -260,7 +260,10 @@ def _configurar_logging() -> None:
 
 def main() -> None:
     _configurar_logging()
-    construir_aplicacion().run_polling()
+    # drop_pending_updates: no arrastrar mensajes/taps acumulados mientras el
+    # bot estuvo caido -- ahora puede proponer compras, y un tap viejo sobre
+    # un interrupt que ya no es el ultimo no debe reanudarse a ciegas.
+    construir_aplicacion().run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
