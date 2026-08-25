@@ -7,8 +7,7 @@ registren. No es un punto de venta, no toma pedidos ni cobra: es una capa de
 consulta y decisión sobre los datos que el negocio ya genera.
 
 > Los datos de este repo (`data/cafeteria.db`, generados por
-> `scripts/seed.py`) son sintéticos a propósito. Los datos reales del
-> negocio no van a un repositorio público.
+> `scripts/seed.py`) son sintéticos a propósito.
 
 ## Arquitectura
 
@@ -113,9 +112,9 @@ local, ver [`LANGFUSE.md`](LANGFUSE.md)). El costo se calcula localmente a
 partir de tokens reales de Gemini × precio oficial de `gemini-2.5-flash`
 (detalle completo en [`evals/costo_1.19.md`](evals/costo_1.19.md)):
 
-- **Costo total:** $0.012725 (15 consultas)
-- **Costo promedio por consulta: $0.000848**
-- **Latencia promedio por consulta:** 11.33s
+- **Costo total:** $0.013018 (15 consultas)
+- **Costo promedio por consulta: $0.000868**
+- **Latencia promedio por consulta:** 8.40s
 
 La latencia es casi toda la llamada al modelo, no el trabajo del grafo
 alrededor: en una traza individual típica, de 9.49s de duración total del
