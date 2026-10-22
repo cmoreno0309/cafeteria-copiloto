@@ -38,7 +38,7 @@ langgraph-prebuilt==1.1.0
 langgraph-sdk==0.4.2
 langsmith==0.10.17
 markdown-it-py==4.2.0
-mcp==2.0.0
+mcp==2.2.0
 mcp-types==2.0.0
 mdurl==0.1.2
 opentelemetry-api==1.44.0
